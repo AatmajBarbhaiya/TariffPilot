@@ -3,11 +3,13 @@ import io
 import csv
 import sqlite3
 from pathlib import Path
-# Ensure this points to your Chroma setup file
-from Tarrifpilot.data_ingestion.ingest_db import get_chroma_collection
+# Chroma setup helper. Import is relative to the project root
+# (Tariffpilot_rag_db/), so run everything from there — same convention as
+# `retrieval` and `config` (see README §1).
+from data_ingestion.ingest_db import get_chroma_collection
 
-# Anchor the DB to Tarrifpilot/Database/ regardless of the caller's CWD.
-_ROOT = Path(__file__).resolve().parents[1]          # Tarrifpilot/
+# Anchor the DB to <project>/Database/ regardless of the caller's CWD.
+_ROOT = Path(__file__).resolve().parents[1]          # Tariffpilot_rag_db/
 DB_PATH = str(_ROOT / "Database" / "tariff_pilot.db")
 TAXONOMY_URL = "https://raw.githubusercontent.com/datasets/harmonized-system/master/data/harmonized-system.csv"
 

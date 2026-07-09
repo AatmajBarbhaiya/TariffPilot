@@ -17,31 +17,53 @@ threaded through every number** (each rate and restriction carries its
 
 Organized into folders by role. Both data stores (SQLite + Chroma) live under
 `Database/`; every script resolves that path via `__file__`, so they run
-correctly from **any** working directory (see bug #10).
+correctly from **any** working directory (see bug #10). Package imports
+(`import config`, `from data_ingestion…`, `from retrieval…`) resolve when you
+run from **inside the project root `Tariffpilot_rag_db/`** — the single,
+uniform convention (see the run block below).
+
+**Data layer** (build the DB + vectors):
 
 | Path | Role | Run order |
 |---|---|---|
 | `init_database/init_db.py` | Creates SQLite schema (`Database/tariff_pilot.db`): 5 tables + indexes, WAL mode | 1 |
 | `init_database/test_db.ipynb` | Scratch notebook for poking at the schema/data | — |
 | `data_ingestion/ingest_db.py` | Chroma client helper — persistent store at `Database/chroma_db`, collection `hs_taxonomy`, cosine space | (imported) |
-| `data_ingestion/ingest_taxonomy.py` | Pulls GitHub `datasets/harmonized-system` CSV → filters to scope → **dual-writes**: upserts vectors into Chroma AND rows into SQL `hs_taxonomy` | 2 |
-| `data_ingestion/ingest_wits_rates.py` | Pulls WITS (World Bank) MFN duty rates for all in-scope codes × 3 reporters → `duty_rates`. Idempotent; retries with backoff; commits periodically | 3 |
-| `data_ingestion/seed_restrictions_and_tests.py` | Seeds `restrictions_flags` (licensing) and `test_set` (ground-truth examples) | 4 |
-| `sanity_check.py` | Coverage report + end-to-end lookup: code → description → rate → restriction, all with source URLs | 5 (any time) |
-| `Database/` | `tariff_pilot.db` + `chroma_db/` — the two data stores | — |
-| `requirements.txt` | `requests`, `chromadb`, `sentence-transformers` | — |
-| `NATIONAL_SOURCES.md` | Live-verified national tariff APIs (UK/US/EU) + enrichment design for TODO #8 | — |
+| `data_ingestion/ingest_taxonomy.py` | GitHub `datasets/harmonized-system` CSV → filter to scope → **dual-write** vectors to Chroma + rows to SQL `hs_taxonomy` | 2 |
+| `data_ingestion/ingest_wits_rates.py` | WITS (World Bank) MFN duty rates for all in-scope codes × 3 reporters → `duty_rates`. Idempotent | 3 |
+| `data_ingestion/seed_restrictions_and_tests.py` | Seeds `restrictions_flags` (licensing) and `test_set` (ground truth) | 4 |
+| `data_ingestion/seed_keywords.py` | Populates `hs_taxonomy.keywords` (85/85 hand-drafted synonyms for Signal 1) | 5 |
+| `sanity_check.py` | Coverage report + end-to-end lookup, all with source URLs | any time |
 
-Run from the **repo root** (the parent of `Tarrifpilot/`) so the
-`from Tarrifpilot.data_ingestion...` package import in `ingest_taxonomy.py`
-resolves:
+**Retrieval layer** (§4 — the classifier):
+
+| Path | Role |
+|---|---|
+| `config.py` | Env-driven settings: LLM/Fireworks backends, thresholds, paths, scope map |
+| `llm/client.py` | `chat_json(messages, schema)` — one entry point, local→Fireworks→None fallback |
+| `retrieval/signals.py` | Signal 1 keyword (FTS5) · Signal 2 scope route (LLM) · Signal 3 vector (Chroma) |
+| `retrieval/arbiter.py` | Merge candidates → fast path / LLM path / abstain, with hallucination guard |
+| `retrieval/card.py` | hs6 → fully sourced result card (SQL joins) |
+| `retrieval/pipeline.py` | `classify(query, country)` — the whole chain in one call |
+| `retrieval/evaluate.py` | Run `test_set` → top-1 / top-3 accuracy (the demo metric) |
+
+**Docs / meta:** `ARCHITECTURE.md` (Docker + AMD local-LLM + Fireworks deploy
+design) · `NATIONAL_SOURCES.md` (live-verified UK/US/EU tariff APIs for TODO #3)
+· `requirements.txt` (`requests`, `chromadb`, `sentence-transformers` for
+ingest; `openai` for retrieval).
+
+Run **from inside `Tariffpilot_rag_db/`** (needs the `nlp` conda env, or
+`pip install -r requirements.txt`):
 
 ```bash
-python -m Tarrifpilot.init_database.init_db
-python -m Tarrifpilot.data_ingestion.ingest_taxonomy
-python -m Tarrifpilot.data_ingestion.ingest_wits_rates
-python -m Tarrifpilot.data_ingestion.seed_restrictions_and_tests
-python Tarrifpilot/sanity_check.py
+cd Tariffpilot_rag_db
+python -m init_database.init_db
+python -m data_ingestion.ingest_taxonomy
+python -m data_ingestion.ingest_wits_rates
+python -m data_ingestion.seed_restrictions_and_tests
+python -m data_ingestion.seed_keywords
+python sanity_check.py            # verify the data layer
+python -m retrieval.evaluate      # accuracy on test_set (LLM optional)
 ```
 
 ## 2. Data stores
@@ -50,7 +72,8 @@ python Tarrifpilot/sanity_check.py
 (row counts below reflect the current DB as of 2026-07-07):
 
 - `hs_taxonomy` — 85 codes: `hs6` PK, description, chapter, heading,
-  `category_tag`, `keywords` (⚠ still 0/85 populated — see §5), `hs_revision`.
+  `category_tag`, `keywords` (**85/85 populated** — synonym layer for Signal 1,
+  seeded by `data_ingestion/seed_keywords.py`), `hs_revision`.
 - `duty_rates` — **205 rows**, one per (code × reporter) that WITS served:
   **all 3 reporters present** (EU 74, GBR 70, USA 61), 83 distinct hs6. duty_type
   `ad_valorem | specific | compound`, rate, `source_url` **required**,
@@ -90,7 +113,15 @@ filters at query time.
 | 9 | DB was **stale** — held 0 EU rows despite reporter 918 being in the code (an earlier WITS re-run never landed) | Completed WITS re-run; `duty_rates` now has all 3 reporters (EU 74, GBR 70, USA 61) |
 | 10 | Folder restructure (`Tarrifplot`→`Tarrifpilot`, flat→subfolders) broke every script's **CWD-relative** paths (`"tariff_pilot.db"`, `"./chroma_db"`) — running from the repo root silently created a stray empty DB | Paths now anchored via `Path(__file__).resolve()` to `Database/`, so scripts work from any CWD |
 
-## 4. Retrieval architecture — 3-signal design (planned)
+## 4. Retrieval architecture — 3-signal design (**implemented**)
+
+> Built in `retrieval/` (`signals.py`, `arbiter.py`, `card.py`, `pipeline.py`,
+> `evaluate.py`) + LLM plumbing in `config.py` / `llm/client.py`. Run
+> `python -m retrieval.evaluate` from the project root (`Tariffpilot_rag_db/`).
+> Current baseline **with no LLM running** (keyword+vector only): top-1 38% /
+> top-3 62%, 0 hallucination-guard violations — the fast path fires only on
+> strong agreement; ambiguous cases abstain to top-3 and are what the LLM
+> arbiter (Signal 2 + arbitration) will resolve once a model is served.
 
 ```
 user text ──┬─► Signal 1: SQL keyword match      (precise, cheap, brittle)
@@ -108,85 +139,91 @@ Design rule that keeps this honest: **Signals 1 & 3 nominate candidates;
 Signal 2 only narrows scope; the Arbiter only chooses among nominated,
 taxonomy-validated candidates.** No layer may invent a code.
 
-### Signal 1 — SQL keyword match
+### Signal 1 — SQL keyword match (`signals.keyword_search`)
 
-Tokenize input (lowercase, strip stopwords), match tokens against
-`description` and `keywords` in `hs_taxonomy`, score by hit count.
+Tokenize input (lowercase, strip stopwords + 1-char tokens), match against
+`description` **and** `keywords` in `hs_taxonomy`. Uses SQLite **FTS5** (a
+porter-stemmed, word-boundary virtual table built on the fly over the 85 rows),
+ranked by **bm25**. Falls back to a per-token `LIKE` chain only if FTS5 isn't
+compiled in — that fallback matches *substrings* (`"ct"` hits "produ**ct**s"),
+which FTS5 avoids.
 
-Grounded prototype results (already tested against the real DB):
-`"vaccine"` → `300241`, `300242` ✓ · `"syringe"` → `901831` ✓ ·
-`"shotgun shells"` → **0 rows** ✗ (descriptions say *cartridges*).
+Grounded results (real DB, after keyword seeding):
+`"vaccine"` → `300241`/`300242` ✓ · `"shotgun shells"` → `930621` ✓ ·
+`"buckshot"` → `930621` ✓ · `"MRI machine"` → `901813` ✓ ·
+`"laptop computer"` → weak/none ✓ (no confident match → guardrail holds).
 
-Conclusion: works for technical jargon, fails on synonyms →
-**populate the `keywords` column** (e.g. `930621`: "shotgun shells, shells,
-buckshot, birdshot"; `300241`: "vaccine, immunization, jab, shot"). ~85 rows,
-one-time effort, can be LLM-drafted then human-skimmed. Prefer SQLite **FTS5**
-(porter stemming, ranked matches) over `LIKE` chains; plain fallback:
-`WHERE description LIKE '%tok%' OR keywords LIKE '%tok%'` per token, ordered
-by tokens hit.
+Output: `[{hs6, score, signal: "keyword"}]` — may be empty; never wrong-but-confident.
 
-Output: `[{hs6, score, matched_tokens, signal: "keyword"}]` — may be empty; never wrong-but-confident.
+### Signal 2 — TOC routing (scope resolution) — **optional**
 
-### Signal 2 — TOC routing (scope resolution)
+One cheap LLM call via `llm.chat_json` (**backend-agnostic**: local llama-server
+first, Fireworks fallback — *not* a specific vendor). Prompt = the static
+chapter/heading scope map from `config.py` (Ch. 30 = pharma; 9018–9022 = medical
+instruments; 9305 = arms parts; 9306 = ammunition) + the user text. Strict
+`json_schema` output, **enum-constrained** to the known chapters/headings:
+`{chapters: [...], headings: [...], in_scope: bool}`, then re-validated in Python.
 
-One cheap LLM call (Gemini 2.5 Flash) with the **static chapter/heading map**
-(a dozen lines: Ch. 30 = pharmaceuticals; 9018–9022 = medical instruments;
-9305 = arms parts; 9306 = ammunition) + the user text →
-returns `{chapters: [...], headings: [...], in_scope: bool}`.
+- Used **only as a filter mask** for Signal 3 (Chroma `where` on `heading`) and
+  as the out-of-scope guardrail.
+- **Degrades gracefully**: no LLM reachable / no key / bad JSON → `toc_route`
+  returns `None` and the pipeline applies **no** scope filter (never blocks).
+  This is the current default state (no model served yet).
 
-- Used **only as a filter mask** for Signal 3 (Chroma metadata `where`
-  filter on `heading`/`chapter`) and as a candidate-consistency check.
-- `in_scope: false` → short-circuit: "outside supported categories" —
-  the guardrail against classifying laptops as medicine.
-- Must degrade gracefully: no API key / timeout / malformed JSON → skip
-  the signal (no filter), never block the pipeline.
-- Strict output contract: JSON only; validate headings against the known
-  set; drop anything unrecognized.
+### Signal 3 — Chroma vector search (`signals.vector_search`)
 
-### Signal 3 — Chroma vector search (semantic fallback)
-
-Always runs (cheap at 85 vectors). `collection.query(query_texts=[input],
-n_results=5, where={"heading": {"$in": scope}} if scope else None)`.
-Convert cosine distance → similarity; carry it as confidence. This is what
-catches *"liquid formulation to protect against viral infections"* → vaccines
-with zero keyword overlap.
+Always runs (cheap at 85 vectors), **no LLM** — Chroma's own local ONNX
+embedder (`all-MiniLM-L6-v2`) does the encoding. `collection.query(query_texts=
+[input], n_results=5, where={"heading": {"$in": scope}} if scope else None)`.
+Cosine distance → similarity (`1 − distance`), carried as confidence. Catches
+paraphrases with zero keyword overlap.
 
 Output: `[{hs6, similarity, signal: "vector"}]`.
 
-### Arbiter
+### Arbiter (`arbiter.arbitrate`)
 
-Merge candidates keyed by hs6, tracking which signals nominated each.
+Merge candidates by hs6, tracking which signals nominated each (+ their scores),
+then decide via a strict ladder:
 
-1. **Fast path (no LLM):** keyword ∩ vector agree on one code, vector
-   similarity above threshold, consistent with Signal 2 scope → return it.
-   Confidence: high.
-2. **LLM path:** send Gemini the candidate list **with official taxonomy
-   descriptions** + user text → must return one of the given hs6 values (or
-   `abstain`) + one-line justification. Reject any code not in the candidate
-   list (validate against `hs_taxonomy` — hallucination guard).
-3. **Abstain path:** no candidates / arbiter abstains → return top-3
-   suggestions with "needs human review" instead of a wrong answer.
+0. **Scope guardrail:** Signal 2 says `in_scope=false` **and** zero keyword hits
+   → `out_of_scope` (don't classify a laptop as medicine).
+1. **Qualify:** a candidate survives if a keyword nominated it **or** its vector
+   similarity ≥ `VECTOR_MIN_SIM` (0.30). None survive → abstain.
+2. **Fast path (no LLM):** keyword's **#1** and vector's **#1** are the *same*
+   code, and its similarity ≥ `FASTPATH_MIN_SIM` (0.50) → `classified`,
+   confidence **high**.
+3. **LLM path:** `chat_json` picks one code from the candidate list (schema
+   `hs6` enum = *exactly* the candidate codes + `"abstain"`, so a made-up code
+   is grammatically impossible; re-validated ∈ candidates too) → `classified`,
+   confidence **medium**.
+4. **Abstain:** nothing converged / LLM abstained → `needs_review` + top-3.
 
-Result card assembly (already proven end-to-end by `sanity_check.py`):
-join chosen hs6 → `hs_taxonomy` (description) → `duty_rates` (rate + type +
-source URL; surface the "NEEDS ENRICHMENT" warning for specific/compound) →
-`restrictions_flags` (license warnings + source URL). Card also shows *which
-signals agreed* — that's the explainability pitch.
+Every path returns the same shape (`decision`, `hs6`, `confidence`, `path`,
+`signals_agreed`, `candidates`, `reason`). `pipeline.classify()` then attaches
+the sourced **card** (`card.build_card`, same joins as `sanity_check.py`):
+`hs_taxonomy` description → `duty_rates` (rate + type + source URL; surfaces the
+"NEEDS ENRICHMENT" warning) → `restrictions_flags` (licence + source URL). The
+card also reports *which signals agreed* — the explainability pitch.
 
-### Proposed module layout
+### Module layout (built)
 
 ```
+config.py         # env-driven: LLM/Fireworks backends, thresholds, paths, scope map
+llm/
+  client.py       # chat_json(messages, schema) — local -> Fireworks -> None
 retrieval/
-  signals.py      # keyword_search(q), toc_route(q), vector_search(q, scope)
-  arbiter.py      # merge + fast path + LLM arbitration + validation
+  signals.py      # keyword_search(q) · toc_route(q) · vector_search(q, scope)
+  arbiter.py      # merge + guardrail + fast path + LLM path + abstain
   card.py         # hs6 -> sourced result card (SQL joins)
-  evaluate.py     # run test_set through classify(), report top-1/top-3 accuracy
-config.py         # model names (embedder, LLM), thresholds, API keys via env
+  pipeline.py     # classify(query, country) — orchestrates the whole chain
+  evaluate.py     # run test_set through classify(), report top-1/top-3
 ```
 
-Evaluation loop: `evaluate.py` runs all `test_set` rows through the full
-chain and prints top-1 / top-3 accuracy per category + a per-example
-signal-agreement breakdown. This is the demo's accuracy number.
+Evaluation: `python -m retrieval.evaluate` runs all `test_set` rows and prints
+top-1 / top-3 accuracy per category + the decision path per example + a
+hallucination-guard assertion (0 invented codes). This is the demo's accuracy
+number — **top-1 38% / top-3 62% with no LLM served** (keyword+vector only);
+the 3 abstain cases are what Signal 2 + the LLM arbiter will convert.
 
 ## 5. Open TODOs (priority order)
 
@@ -200,29 +237,34 @@ signal-agreement breakdown. This is the demo's accuracy number.
   now `930621/629/630/690` + `930510/520/591/599` × 3 countries.
 - ~~Add a licence flag for alkaloid (controlled-substance) medicaments~~ — done;
   `300341–349` + `300441–449` × 3 countries (DEA / UN 1961 / Misuse of Drugs Act).
+- ~~Populate `hs_taxonomy.keywords`~~ — done; 85/85 via `seed_keywords.py`.
+  Signal 1 synonym cases ("shotgun shells"→`930621`, "MRI machine"→`901813`)
+  now resolve; "laptop" still 0 rows (guardrail holds).
 
 **Open (priority order):**
 
-1. **Populate `hs_taxonomy.keywords`** — still 0/85. Unblocks Signal 1 on
-   synonyms (evidence: "shotgun shells" finds nothing today). ~85 rows, one-time,
-   LLM-drafted then human-skimmed.
-2. **Build `retrieval/`** per §4, then `evaluate.py` against `test_set`.
-3. **Real CROSS ruling numbers** into `test_set` (replace `TODO-CROSS`) — each
+- ~~Build `retrieval/` + `evaluate.py`~~ — done; 3 signals + arbiter + sourced
+  card + eval harness. Baseline top-1 38% / top-3 62% with no LLM (see §4).
+
+1. **Serve the local LLM** (llama-server per ARCHITECTURE.md) + wire Signal 2
+   and the arbiter's LLM path — the 3 abstain cases should convert; re-run
+   `evaluate.py` to measure the lift. Then build `app/` + `docker/` (Phase 4).
+2. **Real CROSS ruling numbers** into `test_set` (replace `TODO-CROSS`) — each
    with the ruling's own URL; use the ruling to audit the guessed `correct_hs6`.
    **Done: 3/8** (`901831`, `901832`, `300490`). **Remaining: 5** (`300241`,
    `901812`, `930630` ×2, `930690`).
-4. **Enrich `duty_rates` with absolute/specific values (not just WITS ad-valorem)**
+3. **Enrich `duty_rates` with absolute/specific values (not just WITS ad-valorem)**
    — WITS gives only a percentage (and reports specific duties as `0%`). Fill the
    already-existing but empty columns from national sources: `specific_amount`,
    `specific_unit` (e.g. `USD/1000 units`), `currency`, `unit_of_quantity`, and
    the precise `national_code` (8–10 digit). **APIs already live-verified — see
    `NATIONAL_SOURCES.md`** (UK Trade Tariff + USITC HTS are ready; EU needs the
    TARIC XML export). Biggest correctness gap for landed cost.
-5. **Landed-cost calculator** handling all three duty shapes (ad valorem /
-   specific / compound) once TODO #4 supplies the absolute values.
-6. **Change monitoring** — populate `change_log` from the WTO–IMF Tariff Tracker
+4. **Landed-cost calculator** handling all three duty shapes (ad valorem /
+   specific / compound) once TODO #3 supplies the absolute values.
+5. **Change monitoring** — populate `change_log` from the WTO–IMF Tariff Tracker
    (or the diff step of the enrichment refresh, per `NATIONAL_SOURCES.md`).
-7. **Embedding model swap** (MiniLM is a placeholder) — keep the model name in `config.py`; a swap forces full re-embedding.
+6. **Embedding model swap** (MiniLM is a placeholder) — keep the model name in `config.py`; a swap forces full re-embedding.
 
 ## 6. Known limitations (be upfront in the demo)
 
@@ -235,4 +277,6 @@ signal-agreement breakdown. This is the demo's accuracy number.
   and controlled/alkaloid medicaments across all 3 countries (48 rows), but is
   still **bounded by scope**: in-scope codes outside those families carry no flag
   yet. "Curated" = few but verified rows, not unreliable rows.
-- `keywords` empty until TODO #1 → Signal 1 currently jargon-only.
+- `keywords` are **hand-drafted synonyms** (85/85) — human-skimmable in
+  `seed_keywords.py`; good coverage for lay terms, but not exhaustive. Signal 1
+  is no longer jargon-only.

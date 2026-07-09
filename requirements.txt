@@ -1,3 +1,7 @@
+# data layer (ingestion + Chroma)
 requests
 chromadb
-sentence-transformers
+sentence-transformers        # build/ingest-time embedder only; NOT needed to serve
+
+# retrieval + serving
+openai                        # OpenAI-compatible client for llama-server / Fireworks
