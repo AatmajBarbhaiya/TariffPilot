@@ -27,13 +27,20 @@ except Exception as e:                                   # pragma: no cover
 
 
 def _backends():
-    """Yield (label, base_url, api_key, model, timeout) in priority order,
-    skipping any that are disabled or unconfigured."""
+    """Yield (label, base_url, api_key, model, timeout, max_retries) in priority
+    order, skipping any that are disabled or unconfigured."""
     if LLM.ENABLED:
-        yield ("local", LLM.BASE_URL, LLM.API_KEY, LLM.MODEL, LLM.TIMEOUT)
+        yield ("local", LLM.BASE_URL, LLM.API_KEY, LLM.MODEL, LLM.TIMEOUT,
+               LLM.MAX_RETRIES)
     if FIREWORKS.API_KEY:                                # only if a key is set
         yield ("fireworks", FIREWORKS.BASE_URL, FIREWORKS.API_KEY,
-               FIREWORKS.MODEL, FIREWORKS.TIMEOUT)
+               FIREWORKS.MODEL, FIREWORKS.TIMEOUT, FIREWORKS.MAX_RETRIES)
+
+
+def configured():
+    """True if at least one LLM backend would be tried (cheap, no network call).
+    False means the LLM is effectively OFF (no local, no Fireworks key)."""
+    return OpenAI is not None and any(True for _ in _backends())
 
 
 def _extract_json(text):
@@ -52,9 +59,9 @@ def _extract_json(text):
     return None
 
 
-def _call(base_url, api_key, model, messages, schema, timeout):
+def _call(base_url, api_key, model, messages, schema, timeout, max_retries):
     client = OpenAI(base_url=base_url, api_key=api_key or "sk-noauth",
-                    timeout=timeout, max_retries=0)
+                    timeout=timeout, max_retries=max_retries)
     resp = client.chat.completions.create(
         model=model,
         messages=messages,
@@ -79,9 +86,10 @@ def chat_json(messages, schema, _debug=False):
             print(f"[llm] openai SDK unavailable: {_openai_import_error}")
         return None
 
-    for label, base_url, api_key, model, timeout in _backends():
+    for label, base_url, api_key, model, timeout, max_retries in _backends():
         try:
-            out = _call(base_url, api_key, model, messages, schema, timeout)
+            out = _call(base_url, api_key, model, messages, schema, timeout,
+                        max_retries)
             if out is not None:
                 return out
             if _debug:

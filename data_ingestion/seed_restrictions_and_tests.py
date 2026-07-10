@@ -111,7 +111,7 @@ TEST_SET = [
     ("Vaccine for human medicine, in single-dose vials",
      "300241", None, "medical", "TODO-CROSS", CROSS_HOME),
     ("Diagnostic ultrasonic scanning apparatus (medical)",
-     "901812", None, "medical", "TODO-CROSS", CROSS_HOME),
+     "901812", None, "medical", "NY J88186", "https://rulings.cbp.gov/ruling/J88186"),
     ("Centrifugal shotgun cartridges, 12-gauge, lead shot",
      "930630", None, "ammunition", "TODO-CROSS", CROSS_HOME),
     ("Rifle cartridges, centerfire, .223 caliber, full metal jacket",
