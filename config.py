@@ -18,6 +18,25 @@ CHROMA_PATH = str(ROOT / "Database" / "chroma_db")
 CHROMA_COLLECTION = "hs_taxonomy"
 
 
+def _load_dotenv(path):
+    """Minimal, dependency-free .env loader: KEY=VALUE per line, '#' comments.
+    Uses setdefault so a real shell `export` always overrides the file."""
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                os.environ.setdefault(
+                    key.strip(), val.strip().strip('"').strip("'"))
+    except FileNotFoundError:
+        pass
+
+
+_load_dotenv(ROOT / ".env")          # load before the classes below read env
+
+
 def _env(name, default=""):
     return os.environ.get(name, default).strip()
 
@@ -31,15 +50,22 @@ class LLM:
     BASE_URL = _env("LLM_BASE_URL", "http://localhost:8080/v1")
     MODEL = _env("LLM_MODEL", "local")
     API_KEY = _env("LLM_API_KEY", "sk-noauth")
-    TIMEOUT = float(_env("LLM_TIMEOUT", "6"))          # seconds, local is close
+    # seconds, local is close
+    TIMEOUT = float(_env("LLM_TIMEOUT", "6"))
+    # SDK auto-retries transient 429/5xx/timeout with backoff. 0 = fail fast.
+    MAX_RETRIES = int(_env("LLM_MAX_RETRIES", "2"))
     ENABLED = _env("LLM_LOCAL_ENABLED", "1") != "0"
 
 
 class FIREWORKS:
-    BASE_URL = _env("FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1")
+    BASE_URL = _env("FIREWORKS_BASE_URL",
+                    "https://api.fireworks.ai/inference/v1")
     MODEL = _env("FIREWORKS_MODEL", "accounts/fireworks/models/gpt-oss-20b")
-    API_KEY = _env("FIREWORKS_API_KEY", "")            # empty => backend skipped
+    # empty => backend skipped
+    API_KEY = _env("FIREWORKS_API_KEY", "")
     TIMEOUT = float(_env("FIREWORKS_TIMEOUT", "20"))
+    # Serverless Fireworks occasionally 429s/times out — retry transient errors.
+    MAX_RETRIES = int(_env("FIREWORKS_MAX_RETRIES", "1"))
 
 
 # --- retrieval thresholds (calibrate with retrieval/evaluate.py) ------------
@@ -50,7 +76,8 @@ VECTOR_MIN_SIM = float(_env("VECTOR_MIN_SIM", "0.30"))
 FASTPATH_MIN_SIM = float(_env("FASTPATH_MIN_SIM", "0.50"))
 KEYWORD_K = int(_env("KEYWORD_K", "5"))
 VECTOR_K = int(_env("VECTOR_K", "5"))
-TOP_N = int(_env("TOP_N", "3"))                        # abstain -> top-N suggestions
+# abstain -> top-N suggestions
+TOP_N = int(_env("TOP_N", "3"))
 
 
 # --- static scope map (Signal 2 / consistency guard) ------------------------

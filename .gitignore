@@ -2,7 +2,7 @@
 .env
 
 # python
-_pycache_/
+__pycache__/
 *.pyc
 
 # os
