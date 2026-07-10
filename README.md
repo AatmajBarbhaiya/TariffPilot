@@ -33,6 +33,7 @@ uniform convention (see the run block below).
 | `data_ingestion/ingest_wits_rates.py` | WITS (World Bank) MFN duty rates for all in-scope codes × 3 reporters → `duty_rates`. Idempotent | 3 |
 | `data_ingestion/seed_restrictions_and_tests.py` | Seeds `restrictions_flags` (licensing) and `test_set` (ground truth) | 4 |
 | `data_ingestion/seed_keywords.py` | Populates `hs_taxonomy.keywords` (85/85 hand-drafted synonyms for Signal 1) | 5 |
+| `enrich/` | National duty enrichment — USITC HTS + UK Trade Tariff APIs → 170 customs-grade rows in `duty_rates` (`refresh.py`, `us_adapter.py`, `uk_adapter.py`, `duty_parser.py`) | 6 |
 | `sanity_check.py` | Coverage report + end-to-end lookup, all with source URLs | any time |
 
 **Retrieval layer** (§4 — the classifier):
@@ -62,6 +63,7 @@ python -m data_ingestion.ingest_taxonomy
 python -m data_ingestion.ingest_wits_rates
 python -m data_ingestion.seed_restrictions_and_tests
 python -m data_ingestion.seed_keywords
+python -m enrich.refresh          # national duty numbers (USA + UK)
 python sanity_check.py            # verify the data layer
 python -m retrieval.evaluate      # accuracy on test_set (LLM optional)
 ```
@@ -74,12 +76,18 @@ python -m retrieval.evaluate      # accuracy on test_set (LLM optional)
 - `hs_taxonomy` — 85 codes: `hs6` PK, description, chapter, heading,
   `category_tag`, `keywords` (**85/85 populated** — synonym layer for Signal 1,
   seeded by `data_ingestion/seed_keywords.py`), `hs_revision`.
-- `duty_rates` — **205 rows**, one per (code × reporter) that WITS served:
-  **all 3 reporters present** (EU 74, GBR 70, USA 61), 83 distinct hs6. duty_type
-  `ad_valorem | specific | compound`, rate, `source_url` **required**,
-  `retrieved_date`, notes. Indexed on `(hs6, reporter_country)`. Every in-scope
-  code WITS returned is `ad_valorem` — no specific/compound rows yet (the
-  per-unit values come from national enrichment, TODO #8 / `NATIONAL_SOURCES.md`).
+- `duty_rates` — **375 rows**, additive across sources:
+  - **WITS** 205 rows (HS6-average MFN, all 3 reporters: EU 74, GBR 70, USA 61).
+  - **USITC** 85 rows (USA) + **UK_TARIFF** 85 rows (GBR) — customs-grade national
+    enrichment (`enrich/`, TODO done): exact MFN rate + 10-digit `national_code`
+    + `unit_of_quantity`, with US column-2 and **Chapter-99 overlays** (Section
+    301, e.g. `9903.88.15`) captured in `notes`. All in-scope national duties are
+    `ad_valorem` (no specific/compound in scope; parser handles them regardless).
+  - EU has no national row yet (TARIC has no JSON API — see `NATIONAL_SOURCES.md`);
+    EU cards fall back to the WITS average.
+  - `source` ∈ `WITS | USITC | UK_TARIFF | TARIC | WTO_TDF`; `source_url`
+    **required** (0 missing). Cards prefer the national row and show the WITS
+    average as an explainability baseline.
 - `restrictions_flags` — **48 rows** = 16 distinct codes × USA/EU/GBR, each with
   a `source_url`. Coverage: **ammunition** (`930621/629/630/690`, ATF /
   Directive 2021/555 / Firearms Act), **firearm parts** (`930510/520/591/599`),
@@ -245,6 +253,10 @@ the 3 abstain cases are what Signal 2 + the LLM arbiter will convert.
 
 - ~~Build `retrieval/` + `evaluate.py`~~ — done; 3 signals + arbiter + sourced
   card + eval harness. Baseline top-1 38% / top-3 62% with no LLM (see §4).
+- ~~Enrich `duty_rates` with national numbers (USA + UK)~~ — done; `enrich/`
+  pulls USITC HTS + UK Trade Tariff → 170 national rows with 10-digit codes and
+  Section-301 overlays. EU/TARIC still pending (no JSON API). `python -m
+  enrich.refresh`.
 
 1. **Serve the local LLM** (llama-server per ARCHITECTURE.md) + wire Signal 2
    and the arbiter's LLM path — the 3 abstain cases should convert; re-run
@@ -253,25 +265,25 @@ the 3 abstain cases are what Signal 2 + the LLM arbiter will convert.
    with the ruling's own URL; use the ruling to audit the guessed `correct_hs6`.
    **Done: 3/8** (`901831`, `901832`, `300490`). **Remaining: 5** (`300241`,
    `901812`, `930630` ×2, `930690`).
-3. **Enrich `duty_rates` with absolute/specific values (not just WITS ad-valorem)**
-   — WITS gives only a percentage (and reports specific duties as `0%`). Fill the
-   already-existing but empty columns from national sources: `specific_amount`,
-   `specific_unit` (e.g. `USD/1000 units`), `currency`, `unit_of_quantity`, and
-   the precise `national_code` (8–10 digit). **APIs already live-verified — see
-   `NATIONAL_SOURCES.md`** (UK Trade Tariff + USITC HTS are ready; EU needs the
-   TARIC XML export). Biggest correctness gap for landed cost.
+3. **EU national enrichment** — the one gap left in `duty_rates`: TARIC has no
+   public JSON API, so EU still uses the WITS average. Needs the TARIC3 daily XML
+   export (see `NATIONAL_SOURCES.md`), a larger job than the UK/US REST adapters.
 4. **Landed-cost calculator** handling all three duty shapes (ad valorem /
-   specific / compound) once TODO #3 supplies the absolute values.
+   specific / compound). National `ad_valorem` + 10-digit codes are now in place
+   for US/UK; add freight/insurance inputs and the specific/compound arithmetic.
 5. **Change monitoring** — populate `change_log` from the WTO–IMF Tariff Tracker
-   (or the diff step of the enrichment refresh, per `NATIONAL_SOURCES.md`).
+   (or a diff step added to `enrich.refresh`, per `NATIONAL_SOURCES.md`).
 6. **Embedding model swap** (MiniLM is a placeholder) — keep the model name in `config.py`; a swap forces full re-embedding.
 
 ## 6. Known limitations (be upfront in the demo)
 
-- WITS ad-valorem averages are **HS6 simple averages** of national tariff
-  lines — fine for a demo, not customs-grade precision (that's what national
-  8–10-digit enrichment is for).
-- Specific/compound duties are **flagged, not quantified** until enrichment.
+- WITS ad-valorem averages are **HS6 simple averages** — coarse. US/UK now have
+  **customs-grade national rows** (`enrich/`, exact MFN + 10-digit code); EU
+  still uses the WITS average (no TARIC JSON API — TODO #3).
+- US cards carry a **Section 301 note** (Ch. 99 overlay, e.g. `9903.88.15`) in
+  `notes` — surfaced as text, not yet computed into landed cost (TODO #4).
+- Specific/compound duties are handled by the parser but **none occur in the
+  85 in-scope codes** — every national duty here is ad-valorem or Free.
 - Restrictions are **manually curated with verified citations** (there is no
   uniform API for licensing law). Coverage now spans ammunition, firearm parts,
   and controlled/alkaloid medicaments across all 3 countries (48 rows), but is

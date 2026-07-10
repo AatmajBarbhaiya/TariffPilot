@@ -30,9 +30,12 @@ def build_card(hs6, country):
             "restrictions": [],
         }
 
+        # Prefer a national (customs-grade) row over the WITS average when both
+        # exist — explicit source priority, not insert order.
         rate = cur.execute(
             "SELECT * FROM duty_rates WHERE hs6=? AND reporter_country=? "
-            "ORDER BY rate_id DESC LIMIT 1", (hs6, country)).fetchone()
+            "ORDER BY (source = 'WITS'), rate_id DESC LIMIT 1", (hs6, country)
+        ).fetchone()
         if rate:
             enrich = rate["duty_type"] in ("specific", "compound")
             card["duty"] = {
@@ -40,16 +43,31 @@ def build_card(hs6, country):
                 "duty_type": rate["duty_type"],
                 "tariff_type": rate["tariff_type"],
                 "partner": rate["partner"],
+                "national_code": rate["national_code"],
                 "specific_amount": rate["specific_amount"],
                 "specific_unit": rate["specific_unit"],
                 "currency": rate["currency"],
+                "unit_of_quantity": rate["unit_of_quantity"],
                 "source": rate["source"],
                 "source_url": rate["source_url"],
+                "notes": rate["notes"],
                 "needs_enrichment": enrich,
                 "warning": ("Specific/compound duty — ad-valorem alone "
                             "understates it; enrich from national source."
                             if enrich else None),
             }
+            # When the primary is a national source, carry the WITS HS6-average
+            # as an explainability baseline ("national X% vs WITS-avg Y%").
+            if rate["source"] != "WITS":
+                wits = cur.execute(
+                    "SELECT ad_valorem_rate, source_url FROM duty_rates "
+                    "WHERE hs6=? AND reporter_country=? AND source='WITS' "
+                    "ORDER BY rate_id DESC LIMIT 1", (hs6, country)).fetchone()
+                if wits:
+                    card["duty"]["baseline_wits"] = {
+                        "ad_valorem_rate": wits["ad_valorem_rate"],
+                        "source_url": wits["source_url"],
+                    }
 
         for f in cur.execute(
             "SELECT * FROM restrictions_flags WHERE hs6=? AND reporter_country=?",

@@ -8,11 +8,16 @@
 
 ## 0. TL;DR
 
+> **Status (2026-07-10): UK + US enrichment BUILT.** `enrich/` pulls both APIs
+> into `duty_rates` — 85 USITC (USA) + 85 UK_TARIFF (GBR) national rows with
+> 10-digit codes + Section-301 overlays. Run `python -m enrich.refresh`. EU
+> (TARIC) remains deferred — no JSON API.
+
 | Country | Source | Public JSON API? | Auth | Verdict |
 |---|---|---|---|---|
-| **UK (GBR)** | UK Trade Tariff API (v2) | ✅ Yes, excellent | None | **Build first.** Structured duty expressions + import controls. |
-| **USA** | USITC HTS REST | ✅ Yes | None | **Build second.** Duties are strings → need a small parser. Exposes Ch. 99 (Section 301) overlays. |
-| **EU** | TARIC | ❌ No public JSON | — | **Defer.** Daily TARIC3 **XML** bulk export is the only real path. Keep WITS + deep-link for the hackathon. |
+| **UK (GBR)** | UK Trade Tariff API (v2) | ✅ Yes, excellent | None | ✅ **Built** — `enrich/uk_adapter.py`. Heading → declarable commodities → ERGA OMNES (geo 1011) MFN duty. |
+| **USA** | USITC HTS REST | ✅ Yes | None | ✅ **Built** — `enrich/us_adapter.py` + `duty_parser.py`. 8-digit parent `general` = MFN; Ch. 99 overlays → `notes`. |
+| **EU** | TARIC | ❌ No public JSON | — | **Deferred.** Daily TARIC3 **XML** bulk export is the only real path; EU cards fall back to the WITS average. |
 
 Two findings that change the current priority order:
 
