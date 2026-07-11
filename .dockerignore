@@ -1,0 +1,26 @@
+# Keep the build context small + secrets out of every image.
+.git
+.gitignore
+.venv
+**/__pycache__
+*.pyc
+*.pyo
+
+# secrets — never into a layer
+.env
+docker/.env
+*.env
+!docker/.env.example
+
+# os junk
+.DS_Store
+**/.DS_Store
+
+# not needed at runtime
+*.md
+init_database/test_db.ipynb
+tmp_ingest_uae.py
+sanity_check.py
+data_ingestion
+enrich
+init_database

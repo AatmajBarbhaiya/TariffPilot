@@ -1,26 +1,68 @@
 """
-TariffPilot — test UI.
+TariffPilot — front-end UI.
 
-Run from the project root:
-    conda activate nlp
-    streamlit run streamlit_app.py
+Two ways to run:
+
+  1. Split (containers / production): set BACKEND_URL and this UI becomes THIN —
+     it calls the FastAPI backend over HTTP and does no retrieval itself.
+         BACKEND_URL=http://backend:8000 streamlit run streamlit_app.py
+
+  2. Monolith (quick local dev): leave BACKEND_URL unset and it imports the
+     retrieval pipeline in-process (needs the full deps + Database/ locally).
+         conda activate nlp && streamlit run streamlit_app.py
 
 Type a product description, pick the importing country, get a sourced result
-card (HS code + duty + restrictions + why). The LLM toggle in the sidebar
-switches Signal 2 + the arbiter's LLM path on/off — OFF is free (keyword+vector
-only); ON makes ~1–2 Fireworks calls per classification.
+card (HS code + duty + restrictions + why). The LLM toggle switches Signal 2 +
+the arbiter's LLM path on/off — OFF is free (keyword+vector only).
 """
 import os
 
+import requests
 import streamlit as st
 
-import config
-from llm.client import backend_status
-from retrieval import classify
+# When set, the UI is thin and everything goes through the backend API.
+BACKEND_URL = os.environ.get("BACKEND_URL", "").rstrip("/")
 
-# The real key lives in os.environ (loaded from .env by config); capture it here
-# so the sidebar toggle can enable/disable Fireworks at runtime without losing it.
-_REAL_KEY = os.environ.get("FIREWORKS_API_KEY", "")
+
+# ── data source (HTTP backend, or in-process fallback) ───────────────────────
+def classify_query(query, country, use_llm):
+    if BACKEND_URL:
+        r = requests.post(
+            f"{BACKEND_URL}/api/classify",
+            json={"query": query, "country": country, "use_llm": use_llm},
+            timeout=35,
+        )
+        r.raise_for_status()
+        return r.json()
+    # in-process monolith fallback — import lazily so the thin UI image (which
+    # has no retrieval deps) never touches these when BACKEND_URL is set.
+    import config
+    from retrieval import classify
+    _real = os.environ.get("FIREWORKS_API_KEY", "")
+    config.FIREWORKS.API_KEY = _real if use_llm else ""
+    return classify(query, country)
+
+
+def llm_status():
+    """Return a small dict for the sidebar: whether the LLM path can run."""
+    if BACKEND_URL:
+        try:
+            s = requests.get(f"{BACKEND_URL}/health", timeout=5).json().get("llm", {})
+            return {
+                "reachable": True,
+                "local_reachable": s.get("local_reachable"),
+                "fireworks": bool(s.get("fireworks_configured")),
+            }
+        except Exception:
+            return {"reachable": False, "local_reachable": None, "fireworks": False}
+    from llm.client import backend_status
+    s = backend_status()
+    return {
+        "reachable": True,
+        "local_reachable": s.get("local_reachable"),
+        "fireworks": bool(os.environ.get("FIREWORKS_API_KEY", "")),
+    }
+
 
 st.set_page_config(page_title="TariffPilot", page_icon="📦", layout="centered")
 
@@ -37,19 +79,23 @@ with st.sidebar:
     country_label = st.selectbox("Importing country", list(COUNTRIES), index=0)
     country = COUNTRIES[country_label]
 
+    _st = llm_status()
     use_llm = st.checkbox(
-        "Use LLM (Signal 2 + arbiter)", value=bool(_REAL_KEY),
-        help="ON → ~1–2 Fireworks calls per query. OFF → free keyword+vector only.",
+        "Use LLM (Signal 2 + arbiter)", value=_st["fireworks"],
+        help="ON → ~1–2 LLM calls per query (droplet/Fireworks). "
+             "OFF → free keyword+vector only.",
     )
-    # Apply the toggle by (un)setting the key config.FIREWORKS reads at call time.
-    config.FIREWORKS.API_KEY = _REAL_KEY if use_llm else ""
 
     st.divider()
-    s = backend_status()
     st.caption("**Backend status**")
-    st.write(f"- local reachable: {'✅' if s['local_reachable'] else '❌'}")
-    st.write(f"- Fireworks key: {'✅' if _REAL_KEY else '❌ (set in .env)'}")
-    st.write(f"- LLM this session: {'🟢 on' if use_llm and _REAL_KEY else '⚪ off'}")
+    if BACKEND_URL:
+        st.write(f"- mode: split → `{BACKEND_URL}`")
+        st.write(f"- backend reachable: {'✅' if _st['reachable'] else '❌'}")
+    else:
+        st.write("- mode: in-process (monolith)")
+    st.write(f"- local LLM reachable: {'✅' if _st['local_reachable'] else '❌'}")
+    st.write(f"- Fireworks key: {'✅' if _st['fireworks'] else '❌ (set in .env)'}")
+    st.write(f"- LLM this session: {'🟢 on' if use_llm and _st['fireworks'] else '⚪ off'}")
 
 
 # ── card renderer ───────────────────────────────────────────────────────────
@@ -145,8 +191,13 @@ go = st.button("Classify", type="primary")
 
 if go and query.strip():
     with st.spinner("Classifying…"):
-        result = classify(query, country)
-    render(result, country_label, country)
+        try:
+            result = classify_query(query, country, use_llm)
+        except requests.RequestException as e:
+            st.error(f"Backend unreachable: {e}")
+            result = None
+    if result:
+        render(result, country_label, country)
 elif go:
     st.info("Enter a product description first.")
 
