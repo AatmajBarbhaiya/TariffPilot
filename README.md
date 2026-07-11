@@ -65,7 +65,7 @@ python -m data_ingestion.seed_restrictions_and_tests
 python -m data_ingestion.seed_keywords
 python -m enrich.refresh          # national duty numbers (USA + UK)
 python sanity_check.py            # verify the data layer
-python -m retrieval.evaluate      # accuracy on test_set (LLM optional)
+python -m tests.evaluate      # accuracy on test_set (LLM optional)
 ```
 
 ## 2. Data stores
@@ -125,7 +125,7 @@ filters at query time.
 
 > Built in `retrieval/` (`signals.py`, `arbiter.py`, `card.py`, `pipeline.py`,
 > `evaluate.py`) + LLM plumbing in `config.py` / `llm/client.py`. Run
-> `python -m retrieval.evaluate` from the project root (`Tariffpilot_rag_db/`).
+> `python -m tests.evaluate` from the project root (`Tariffpilot_rag_db/`).
 > Current baseline **with no LLM running** (keyword+vector only): top-1 38% /
 > top-3 62%, 0 hallucination-guard violations — the fast path fires only on
 > strong agreement; ambiguous cases abstain to top-3 and are what the LLM
@@ -227,7 +227,7 @@ retrieval/
   evaluate.py     # run test_set through classify(), report top-1/top-3
 ```
 
-Evaluation: `python -m retrieval.evaluate` runs all `test_set` rows and prints
+Evaluation: `python -m tests.evaluate` runs all `test_set` rows and prints
 top-1 / top-3 accuracy per category + the decision path per example + a
 hallucination-guard assertion (0 invented codes). This is the demo's accuracy
 number — **top-1 38% / top-3 62% with no LLM served** (keyword+vector only);

@@ -68,7 +68,16 @@ class FIREWORKS:
     MAX_RETRIES = int(_env("FIREWORKS_MAX_RETRIES", "1"))
 
 
-# --- retrieval thresholds (calibrate with retrieval/evaluate.py) ------------
+# --- shared LLM sampling knobs (both backends) ------------------------------
+# gpt-oss is a REASONING model: at default effort it spends the whole token
+# budget "thinking" and never emits the final JSON (verified: 2048 tokens ->
+# empty). "low" collapses reasoning to ~80 tokens and returns clean JSON.
+# Set to "" for a non-reasoning model (e.g. plain Qwen) that rejects the param.
+LLM_REASONING_EFFORT = _env("LLM_REASONING_EFFORT", "low")
+LLM_MAX_OUTPUT_TOKENS = int(_env("LLM_MAX_OUTPUT_TOKENS", "1024"))
+
+
+# --- retrieval thresholds (calibrate with tests/evaluate.py) ------------
 # Min cosine similarity for a vector hit to count as a real candidate.
 VECTOR_MIN_SIM = float(_env("VECTOR_MIN_SIM", "0.30"))
 # Fast path (no LLM) requires keyword+vector to agree AND the vector to be at

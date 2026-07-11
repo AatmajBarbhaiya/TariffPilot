@@ -104,30 +104,35 @@ def arbitrate(query, keyword_hits, vector_hits, toc):
                            "Keyword and vector both rank this code first.")
 
     # 2) LLM path — let the model choose among the nominated candidates only.
+    from llm import configured, last_backend
     choice = _llm_arbitrate(query, qualified)
+    used = last_backend()          # which backend answered: 'local' | 'fireworks' | None
     if choice and choice != "abstain":
         pick = next((c for c in qualified if c["hs6"] == choice), None)
         if pick:                                        # validated ∈ candidates
             return _result("classified", pick["hs6"], "medium", "llm",
                            sorted(pick["signals"]), top_n,
-                           "LLM selected from nominated candidates.")
+                           "LLM selected from nominated candidates.",
+                           source=used or "llm")
 
     # 3) Abstain — surface top-N, and say WHICH kind of abstain this is so the
     # UI isn't a mystery: LLM declined vs LLM off vs LLM tried-but-no-answer.
-    from llm import configured
     if choice == "abstain":
         path, reason = ("llm_abstain",
                         "The LLM reviewed the candidates and declined — no strong "
                         "fit among them.")
+        src = used or "llm"
     elif not configured():
         path, reason = ("ambiguous",
                         "Signals disagree and the LLM is off — turn it on to "
                         "disambiguate these candidates.")
+        src = "keyword+vector"
     else:
         path, reason = ("llm_unavailable",
                         "The LLM gave no usable answer (unreachable or invalid); "
                         "showing top candidates.")
-    return _result("needs_review", None, "low", path, [], top_n, reason)
+        src = "keyword+vector"
+    return _result("needs_review", None, "low", path, [], top_n, reason, source=src)
 
 
 def _llm_arbitrate(query, qualified):
@@ -164,7 +169,8 @@ def _llm_arbitrate(query, qualified):
     return hs6 if hs6 in codes or hs6 == "abstain" else None
 
 
-def _result(decision, hs6, confidence, path, signals_agreed, candidates, reason):
+def _result(decision, hs6, confidence, path, signals_agreed, candidates, reason,
+            source="keyword+vector"):
     # Serialise candidates (sets -> sorted lists) for JSON friendliness.
     cand_out = [{
         "hs6": c["hs6"],
@@ -180,6 +186,7 @@ def _result(decision, hs6, confidence, path, signals_agreed, candidates, reason)
         "path": path,                   # classified: fast | llm
                                         # not:  scope | no_match | ambiguous
                                         #       | llm_abstain | llm_unavailable
+        "source": source,               # who produced it: keyword+vector | local | fireworks
         "signals_agreed": signals_agreed,
         "candidates": cand_out,
         "reason": reason,

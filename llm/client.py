@@ -14,7 +14,7 @@ defensively so a backend that only supports `json_object` still works.
 import json
 import re
 
-from config import LLM, FIREWORKS
+from config import LLM, FIREWORKS, LLM_REASONING_EFFORT, LLM_MAX_OUTPUT_TOKENS
 
 # openai SDK is imported lazily so importing this module never hard-fails on a
 # box without the package (e.g. running Signal 1 only).
@@ -43,6 +43,17 @@ def configured():
     return OpenAI is not None and any(True for _ in _backends())
 
 
+# Label of the backend that produced the most recent chat_json() answer.
+_last_backend = None
+
+
+def last_backend():
+    """'local' | 'fireworks' if the last chat_json() call was answered by that
+    backend; None if none answered (or it wasn't called). Not thread-safe —
+    intended for single-threaded callers like evaluate.py."""
+    return _last_backend
+
+
 def _extract_json(text):
     """Best-effort: parse text as JSON, else pull the first {...} block."""
     if not text:
@@ -62,16 +73,21 @@ def _extract_json(text):
 def _call(base_url, api_key, model, messages, schema, timeout, max_retries):
     client = OpenAI(base_url=base_url, api_key=api_key or "sk-noauth",
                     timeout=timeout, max_retries=max_retries)
-    resp = client.chat.completions.create(
+    kwargs = dict(
         model=model,
         messages=messages,
         temperature=0,
-        max_tokens=512,
+        max_tokens=LLM_MAX_OUTPUT_TOKENS,
         response_format={
             "type": "json_schema",
             "json_schema": {"name": "response", "schema": schema, "strict": True},
         },
     )
+    # Reasoning models (gpt-oss) must be told to think briefly, or they burn the
+    # whole token budget before emitting the JSON. Omitted for non-reasoning models.
+    if LLM_REASONING_EFFORT:
+        kwargs["reasoning_effort"] = LLM_REASONING_EFFORT
+    resp = client.chat.completions.create(**kwargs)
     return _extract_json(resp.choices[0].message.content)
 
 
@@ -81,6 +97,8 @@ def chat_json(messages, schema, _debug=False):
 
     `schema` is a flat JSON Schema (enums + short strings — see ARCHITECTURE §3).
     """
+    global _last_backend
+    _last_backend = None
     if OpenAI is None:
         if _debug:
             print(f"[llm] openai SDK unavailable: {_openai_import_error}")
@@ -91,6 +109,7 @@ def chat_json(messages, schema, _debug=False):
             out = _call(base_url, api_key, model, messages, schema, timeout,
                         max_retries)
             if out is not None:
+                _last_backend = label
                 return out
             if _debug:
                 print(f"[llm] {label}: empty/unparseable response")
