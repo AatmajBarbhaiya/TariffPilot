@@ -1,0 +1,13 @@
+# Streamlit theme — light base so native widgets (selectbox, inputs, menus)
+# match the app's light mode. The in-app 🌙/☀️ navbar toggle overlays a dark
+# CSS skin on top of this for the custom elements.
+[theme]
+base = "light"
+primaryColor = "#1f6feb"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#eef5ff"
+textColor = "#12243f"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
