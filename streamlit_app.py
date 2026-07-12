@@ -1,7 +1,9 @@
 """
 TariffPilot — front-end UI (single scrolling page, light theme).
 
-Two ways to run:
+Run from the project root:
+    conda activate nlp
+    streamlit run streamlit_app.py
 
   1. Split (containers / production): set BACKEND_URL and this UI becomes THIN —
      it calls the FastAPI backend over HTTP and does no retrieval itself.
@@ -20,7 +22,6 @@ import os
 import re
 import time
 
-import requests
 import streamlit as st
 
 import config
