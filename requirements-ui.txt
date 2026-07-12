@@ -1,4 +1,0 @@
-# UI (front-end) deps ONLY. The UI is thin: it renders and calls the backend
-# API over HTTP. No retrieval / chromadb / DB here.
-streamlit
-requests

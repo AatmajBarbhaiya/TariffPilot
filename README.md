@@ -1,140 +1,157 @@
-# TariffPilot — Data Layer & Retrieval Architecture
+# TariffPilot
 
-RAG-based HS-code classifier + tariff/landed-cost lookup with **provenance
-threaded through every number** (each rate and restriction carries its
-`source_url`). Hackathon scope: 2 categories × 3 countries, per
-`TariffPilot_Data_Ingestion_Spec.md`.
+**An HS-code classifier + tariff / landed-cost lookup, with a `source_url` behind
+every number.** Type a product in plain English ("shotgun shells", "whisky", "MRI
+machine") and TariffPilot returns the 6-digit HS classification, the applicable
+import duty, any licensing restrictions, and — crucially — the official
+government URL each figure came from. The reasoning step runs on a **self-hosted
+LLM on an AMD Instinct MI300X** (vLLM on ROCm), with Fireworks as an optional
+cloud fallback.
 
-| Dimension | Choice |
-|---|---|
-| Categories | **Medical** (HS Ch. 30 + headings 9018–9022) · **Ammunition** (Ch. 93 headings 9305, 9306) |
-| Countries (WITS reporter codes) | **USA** (840) · **GBR** (826) · **EU** (918) |
-| Taxonomy revision | HS 2022 ("H6 / 2022") — 85 six-digit codes in scope (77 medical, 8 ammunition) |
+> **Scope:** 4 product families — **Medical** (HS Ch. 30 + headings 9018–9022),
+> **Arms & Ammunition** (9305, 9306), **Watches** (9101, 9102), **Spirits &
+> Liqueurs** (2208) — across **4 markets**: **USA · UK · EU · UAE**.
 
 ---
 
-## 1. Repo layout
+## What we built
 
-Organized into folders by role. Both data stores (SQLite + Chroma) live under
-`Database/`; every script resolves that path via `__file__`, so they run
-correctly from **any** working directory (see bug #10). Package imports
-(`import config`, `from data_ingestion…`, `from retrieval…`) resolve when you
-run from **inside the project root `Tariffpilot_rag_db/`** — the single,
-uniform convention (see the run block below).
+- **A 3-signal RAG classifier** (keyword + semantic vector + LLM arbitration) that
+  maps free text → HS-6, and **cannot hallucinate a code**: the LLM only ever
+  *chooses among* candidates that the keyword/vector signals already nominated
+  and that are validated against the real taxonomy.
+- **Provenance on every value** — each duty rate and restriction carries the
+  government `source_url` it was scraped from (WITS, USITC, UK Trade Tariff).
+- **A three-tier deployment on AMD hardware** — Streamlit UI → FastAPI backend →
+  vLLM LLM server, all running on a single MI300X droplet.
+- **A reproducible evaluation harness** over a labelled test set
+  (`tests/evaluate.py`) reporting top-1 / top-3 accuracy and asserting zero
+  invented codes.
 
-**Data layer** (build the DB + vectors):
+---
 
-| Path | Role | Run order |
-|---|---|---|
-| `init_database/init_db.py` | Creates SQLite schema (`Database/tariff_pilot.db`): 5 tables + indexes, WAL mode | 1 |
-| `init_database/test_db.ipynb` | Scratch notebook for poking at the schema/data | — |
-| `data_ingestion/ingest_db.py` | Chroma client helper — persistent store at `Database/chroma_db`, collection `hs_taxonomy`, cosine space | (imported) |
-| `data_ingestion/ingest_taxonomy.py` | GitHub `datasets/harmonized-system` CSV → filter to scope → **dual-write** vectors to Chroma + rows to SQL `hs_taxonomy` | 2 |
-| `data_ingestion/ingest_wits_rates.py` | WITS (World Bank) MFN duty rates for all in-scope codes × 3 reporters → `duty_rates`. Idempotent | 3 |
-| `data_ingestion/seed_restrictions_and_tests.py` | Seeds `restrictions_flags` (licensing) and `test_set` (ground truth) | 4 |
-| `data_ingestion/seed_keywords.py` | Populates `hs_taxonomy.keywords` (85/85 hand-drafted synonyms for Signal 1) | 5 |
-| `enrich/` | National duty enrichment — USITC HTS + UK Trade Tariff APIs → 170 customs-grade rows in `duty_rates` (`refresh.py`, `us_adapter.py`, `uk_adapter.py`, `duty_parser.py`) | 6 |
-| `sanity_check.py` | Coverage report + end-to-end lookup, all with source URLs | any time |
+## AMD / compute usage
 
-**Retrieval layer** (§4 — the classifier):
+The LLM reasoning path (Signal 2 scope-routing + the arbiter's tie-break) is
+served **entirely on AMD silicon** — no proprietary hosted model in the primary
+path.
 
-| Path | Role |
+| | Detail |
 |---|---|
-| `config.py` | Env-driven settings: LLM/Fireworks backends, thresholds, paths, scope map |
-| `llm/client.py` | `chat_json(messages, schema)` — one entry point, local→Fireworks→None fallback |
-| `retrieval/signals.py` | Signal 1 keyword (FTS5) · Signal 2 scope route (LLM) · Signal 3 vector (Chroma) |
-| `retrieval/arbiter.py` | Merge candidates → fast path / LLM path / abstain, with hallucination guard |
-| `retrieval/card.py` | hs6 → fully sourced result card (SQL joins) |
-| `retrieval/pipeline.py` | `classify(query, country)` — the whole chain in one call |
-| `retrieval/evaluate.py` | Run `test_set` → top-1 / top-3 accuracy (the demo metric) |
+| **Hardware** | AMD Instinct **MI300X** (1× GPU, 192 GB VRAM) — DigitalOcean vLLM 1-Click droplet |
+| **Stack** | **ROCm 7.2.4**, Ubuntu 24.04 |
+| **Serving engine** | **vLLM 0.23.0** (`0.23.0+rocm723`), OpenAI-compatible endpoint |
+| **Model** | `openai/gpt-oss-20b` (reasoning model; called with `reasoning_effort=low`) |
+| **Footprint** | ~155 GiB KV cache allocated; ~6.3M-token cache, ~48× max concurrency |
+| **How the app uses it** | The backend calls the vLLM endpoint through the OpenAI SDK. The URL/model are pure env config (`LLM_BASE_URL`, `LLM_MODEL`) — the *same* `chat_json()` code runs against local vLLM or Fireworks with no code change. |
 
-**Docs / meta:** `ARCHITECTURE.md` (Docker + AMD local-LLM + Fireworks deploy
-design) · `NATIONAL_SOURCES.md` (live-verified UK/US/EU tariff APIs for TODO #3)
-· `requirements.txt` (`requests`, `chromadb`, `sentence-transformers` for
-ingest; `openai` for retrieval).
+**Graceful degradation:** if no LLM backend is reachable, the pipeline does **not**
+crash — it drops the LLM scope-filter and the arbiter abstains to a top-3
+suggestion list. AMD-served LLM is the quality path, not a hard dependency.
 
-Run **from inside `Tariffpilot_rag_db/`** (needs the `nlp` conda env, or
-`pip install -r requirements.txt`):
+---
+
+## Quickstart
+
+### Option A — run locally (monolith)
+
+The UI imports the retrieval pipeline in-process. Needs the prebuilt DB (ships in
+`Database/`). LLM is optional: set `FIREWORKS_API_KEY`, or point `LLM_BASE_URL` at
+a vLLM server, or leave both unset to run keyword+vector only.
 
 ```bash
-cd Tariffpilot_rag_db
-python -m init_database.init_db
-python -m data_ingestion.ingest_taxonomy
-python -m data_ingestion.ingest_wits_rates
-python -m data_ingestion.seed_restrictions_and_tests
-python -m data_ingestion.seed_keywords
-python -m enrich.refresh          # national duty numbers (USA + UK)
-python sanity_check.py            # verify the data layer
-python -m tests.evaluate      # accuracy on test_set (LLM optional)
+pip install -r requirements.txt
+streamlit run streamlit_app.py            # http://localhost:8501
 ```
 
-## 2. Data stores
+To use a remote vLLM (e.g. the AMD droplet) from your laptop:
 
-**SQLite (`Database/tariff_pilot.db`)** — the structured/provenance side
-(row counts below reflect the current DB as of 2026-07-07):
+```bash
+export LLM_LOCAL_ENABLED=1
+export LLM_BASE_URL=http://<droplet-ip>:8000/v1
+export LLM_MODEL=gpt-oss-20b
+streamlit run streamlit_app.py
+```
 
-- `hs_taxonomy` — 85 codes: `hs6` PK, description, chapter, heading,
-  `category_tag`, `keywords` (**85/85 populated** — synonym layer for Signal 1,
-  seeded by `data_ingestion/seed_keywords.py`), `hs_revision`.
-- `duty_rates` — **375 rows**, additive across sources:
-  - **WITS** 205 rows (HS6-average MFN, all 3 reporters: EU 74, GBR 70, USA 61).
-  - **USITC** 85 rows (USA) + **UK_TARIFF** 85 rows (GBR) — customs-grade national
-    enrichment (`enrich/`, TODO done): exact MFN rate + 10-digit `national_code`
-    + `unit_of_quantity`, with US column-2 and **Chapter-99 overlays** (Section
-    301, e.g. `9903.88.15`) captured in `notes`. All in-scope national duties are
-    `ad_valorem` (no specific/compound in scope; parser handles them regardless).
-  - EU has no national row yet (TARIC has no JSON API — see `NATIONAL_SOURCES.md`);
-    EU cards fall back to the WITS average.
-  - `source` ∈ `WITS | USITC | UK_TARIFF | TARIC | WTO_TDF`; `source_url`
-    **required** (0 missing). Cards prefer the national row and show the WITS
-    average as an explainability baseline.
-- `restrictions_flags` — **48 rows** = 16 distinct codes × USA/EU/GBR, each with
-  a `source_url`. Coverage: **ammunition** (`930621/629/630/690`, ATF /
-  Directive 2021/555 / Firearms Act), **firearm parts** (`930510/520/591/599`),
-  and **alkaloid/controlled medicaments** (`300341–349`, `300441–449`, DEA /
-  UN 1961 Convention / Misuse of Drugs Act). Citations manually verified.
-- `test_set` — 8 labelled examples: `example_id`, `product_description`,
-  `correct_hs6`, `correct_national_code` (empty — fills with TODO #8),
-  `category_tag`, `ruling_reference`, `source_url`. **3 of 8 verified against
-  real CROSS rulings** (`901831`→HQ H343563, `901832`→HQ 965580,
-  `300490`→HQ 963707); the remaining 5 are still `TODO-CROSS` (see TODO #5).
-- `change_log` — empty; reserved for WTO–IMF Tariff Tracker feed.
+### Option B — the full three-tier deployment (as demoed on the MI300X)
 
-**Chroma (`Database/chroma_db`)** — the semantic side: collection `hs_taxonomy`,
-85 vectors, 384-dim (default `all-MiniLM-L6-v2` — **not final**; swapping the
-model requires re-embedding the whole collection since dimensions change).
-Metadata per vector: hs6, chapter, heading, category_tag → usable as `where`
-filters at query time.
+All three processes run on the droplet. vLLM ships pre-installed inside the
+`rocm` Docker container on the DigitalOcean 1-Click image.
 
-## 3. Bug log (found & fixed)
+```bash
+# 1) LLM — start vLLM inside the rocm container (serves on :8000)
+docker exec -d rocm bash -lc \
+  "vllm serve openai/gpt-oss-20b --served-model-name gpt-oss-20b \
+   --host 0.0.0.0 --port 8000 --gpu-memory-utilization 0.90 > /root/vllm.log 2>&1"
 
-| # | Bug | Fix |
+# 2) Backend API (:8080) — talks to vLLM on localhost
+cd TariffPilot && python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+LLM_LOCAL_ENABLED=1 LLM_BASE_URL=http://localhost:8000/v1 LLM_MODEL=gpt-oss-20b \
+  uvicorn app.main:app --host 127.0.0.1 --port 8080
+
+# 3) UI (:8501) — thin client that calls the backend
+BACKEND_URL=http://localhost:8080 \
+  streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501
+```
+
+Ports come from these launch commands, not the repo. **Firewall:** expose only
+`8501` (UI) to the outside; keep vLLM `:8000` internal.
+
+**Smoke-test the API:**
+
+```bash
+curl localhost:8080/health
+curl -s localhost:8080/api/classify -H 'Content-Type: application/json' \
+  -d '{"query":"whisky","country":"USA","use_llm":true}'
+# → {"decision":"classified","hs6":"220830", ... ,"source":"local"}
+```
+
+---
+
+## Where the code lives (main code path)
+
+The one function to read is **`retrieval/pipeline.py :: classify(query, country)`** —
+it orchestrates the whole chain. Follow it in this order:
+
+| Step | File | What it does |
 |---|---|---|
-| 1 | EU never ingested — old script only listed USA/GBR | Added reporter 918; ingestion now driven by `hs_taxonomy` (85 codes) instead of 3 hardcoded ones |
-| 2 | SDMX positional parsing wrong — read index 5 as "specific-lines count"; it's actually `MIN_RATE` | Verified real attribute order against live response: OBS_VALUE=0, TOTALNOOFLINES=7, **NBR_NA_LINES=10** |
-| 3 | Ammunition duties silently reported as "0% ad valorem" — WITS can't express specific duties as a % | `NBR_NA_LINES > 0` now tags the row `specific`/`compound` + "NEEDS ENRICHMENT" note instead of a fake 0% |
-| 4 | `partner` column stored `'MFN'` (a rate type, not a partner) | Stores `'WLD'` (world = MFN baseline) |
-| 5 | Re-running taxonomy ingest crashed (`add` on duplicate IDs) | `upsert`; WITS ingest deletes its own rows first → both idempotent |
-| 6 | WITS read-timeouts killed codes silently | 60 s timeout, 4 retries w/ exponential backoff, shared session, commit every 10 rows |
-| 7 | `hs_taxonomy` table missing from SQL entirely (spec requires it) | Created + populated; Chroma and SQL now mirror each other |
-| 8 | Test label `300220` (vaccines) doesn't exist in HS 2022 — split into `300241`/`300242` | Fixed to `300241` in seed file; seed re-run now applied (verified in DB) |
-| 9 | DB was **stale** — held 0 EU rows despite reporter 918 being in the code (an earlier WITS re-run never landed) | Completed WITS re-run; `duty_rates` now has all 3 reporters (EU 74, GBR 70, USA 61) |
-| 10 | Folder restructure (`Tarrifplot`→`Tarrifpilot`, flat→subfolders) broke every script's **CWD-relative** paths (`"tariff_pilot.db"`, `"./chroma_db"`) — running from the repo root silently created a stray empty DB | Paths now anchored via `Path(__file__).resolve()` to `Database/`, so scripts work from any CWD |
+| **Entry (in-process)** | `retrieval/pipeline.py` | `classify()` — the whole chain in one call |
+| **Entry (HTTP API)** | `app/main.py` | FastAPI: `POST /api/classify`, `GET /health`, `GET /api/card/{hs6}/{country}` |
+| **Entry (UI)** | `streamlit_app.py` | Front-end; thin (calls backend) when `BACKEND_URL` is set, else monolith |
+| **Signals** | `retrieval/signals.py` | Signal 1 keyword (FTS5) · Signal 2 scope-route (LLM) · Signal 3 vector (Chroma) |
+| **Decision** | `retrieval/arbiter.py` | Merge candidates → fast-path / LLM-path / abstain, with the no-hallucination guard |
+| **Result card** | `retrieval/card.py` | hs6 → fully sourced card (SQL joins: duty + restrictions + URLs) |
+| **LLM plumbing** | `llm/client.py` | `chat_json(messages, schema)` — one entry point, local vLLM → Fireworks → None |
+| **Config** | `config.py` | All env-driven settings: LLM backends, thresholds, paths, scope map |
+| **Eval** | `tests/evaluate.py` | `python -m tests.evaluate` → top-1/top-3 accuracy on `tests/test.json` |
 
-## 4. Retrieval architecture — 3-signal design (**implemented**)
+---
 
-> Built in `retrieval/` (`signals.py`, `arbiter.py`, `card.py`, `pipeline.py`,
-> `evaluate.py`) + LLM plumbing in `config.py` / `llm/client.py`. Run
-> `python -m tests.evaluate` from the project root (`Tariffpilot_rag_db/`).
-> Current baseline **with no LLM running** (keyword+vector only): top-1 38% /
-> top-3 62%, 0 hallucination-guard violations — the fast path fires only on
-> strong agreement; ambiguous cases abstain to top-3 and are what the LLM
-> arbiter (Signal 2 + arbitration) will resolve once a model is served.
+## External services
+
+| Service | Role | Where configured |
+|---|---|---|
+| **AMD MI300X + vLLM** (self-hosted) | **Primary LLM** — Signal 2 scope-routing + arbiter tie-break | `LLM_BASE_URL`, `LLM_MODEL` in `config.py` |
+| **Fireworks AI** | **Optional fallback LLM** (`gpt-oss-20b`); skipped entirely if no API key | `FIREWORKS_API_KEY` (unset by default) |
+| **WITS** (World Bank) | MFN duty-rate averages, all reporters | `data_ingestion/ingest_wits_rates.py` |
+| **USITC HTS API** | US customs-grade national duty (10-digit codes, Section-301 overlays) | `enrich/us_adapter.py` |
+| **UK Trade Tariff API** | UK customs-grade national duty | `enrich/uk_adapter.py` |
+| **HuggingFace Hub** | Model weights (gpt-oss-20b) + Chroma's ONNX MiniLM embedder | pulled at vLLM launch / first query |
+| **HS taxonomy dataset** (GitHub `datasets/harmonized-system`) | Source of the HS-2022 code list | `data_ingestion/ingest_taxonomy.py` |
+
+External-service keys are **never committed** — `config.py` reads them from the
+environment / a git-ignored `.env`. EU national duties have no public JSON API
+(TARIC), so EU falls back to the WITS average — documented in `NATIONAL_SOURCES.md`.
+
+---
+
+## How classification works (3-signal design)
 
 ```
-user text ──┬─► Signal 1: SQL keyword match      (precise, cheap, brittle)
-            ├─► Signal 2: TOC routing, LLM       (scope filter, not a decider)
-            └─► Signal 3: Chroma vector search   (semantic, handles paraphrase)
+user text ──┬─► Signal 1: SQL keyword match (FTS5/bm25)  precise, cheap, brittle
+            ├─► Signal 2: scope routing via LLM          narrows scope only
+            └─► Signal 3: Chroma vector search           semantic, paraphrase-robust
                      │
                      ▼
               Arbiter (validate + decide)
@@ -143,152 +160,81 @@ user text ──┬─► Signal 1: SQL keyword match      (precise, cheap, brit
    result card: hs6 + description + duty + restrictions + source URLs
 ```
 
-Design rule that keeps this honest: **Signals 1 & 3 nominate candidates;
-Signal 2 only narrows scope; the Arbiter only chooses among nominated,
-taxonomy-validated candidates.** No layer may invent a code.
+**The integrity rule:** Signals 1 & 3 *nominate* candidates; Signal 2 only
+*narrows scope*; the Arbiter only *chooses among* nominated, taxonomy-validated
+candidates. No layer may invent a code — the LLM's output schema is an **enum of
+exactly the candidate codes + `"abstain"`**, so a made-up HS-6 is grammatically
+impossible, and it's re-validated against the candidate set in Python anyway.
 
-### Signal 1 — SQL keyword match (`signals.keyword_search`)
-
-Tokenize input (lowercase, strip stopwords + 1-char tokens), match against
-`description` **and** `keywords` in `hs_taxonomy`. Uses SQLite **FTS5** (a
-porter-stemmed, word-boundary virtual table built on the fly over the 85 rows),
-ranked by **bm25**. Falls back to a per-token `LIKE` chain only if FTS5 isn't
-compiled in — that fallback matches *substrings* (`"ct"` hits "produ**ct**s"),
-which FTS5 avoids.
-
-Grounded results (real DB, after keyword seeding):
-`"vaccine"` → `300241`/`300242` ✓ · `"shotgun shells"` → `930621` ✓ ·
-`"buckshot"` → `930621` ✓ · `"MRI machine"` → `901813` ✓ ·
-`"laptop computer"` → weak/none ✓ (no confident match → guardrail holds).
-
-Output: `[{hs6, score, signal: "keyword"}]` — may be empty; never wrong-but-confident.
-
-### Signal 2 — TOC routing (scope resolution) — **optional**
-
-One cheap LLM call via `llm.chat_json` (**backend-agnostic**: local llama-server
-first, Fireworks fallback — *not* a specific vendor). Prompt = the static
-chapter/heading scope map from `config.py` (Ch. 30 = pharma; 9018–9022 = medical
-instruments; 9305 = arms parts; 9306 = ammunition) + the user text. Strict
-`json_schema` output, **enum-constrained** to the known chapters/headings:
-`{chapters: [...], headings: [...], in_scope: bool}`, then re-validated in Python.
-
-- Used **only as a filter mask** for Signal 3 (Chroma `where` on `heading`) and
-  as the out-of-scope guardrail.
-- **Degrades gracefully**: no LLM reachable / no key / bad JSON → `toc_route`
-  returns `None` and the pipeline applies **no** scope filter (never blocks).
-  This is the current default state (no model served yet).
-
-### Signal 3 — Chroma vector search (`signals.vector_search`)
-
-Always runs (cheap at 85 vectors), **no LLM** — Chroma's own local ONNX
-embedder (`all-MiniLM-L6-v2`) does the encoding. `collection.query(query_texts=
-[input], n_results=5, where={"heading": {"$in": scope}} if scope else None)`.
-Cosine distance → similarity (`1 − distance`), carried as confidence. Catches
-paraphrases with zero keyword overlap.
-
-Output: `[{hs6, similarity, signal: "vector"}]`.
-
-### Arbiter (`arbiter.arbitrate`)
-
-Merge candidates by hs6, tracking which signals nominated each (+ their scores),
-then decide via a strict ladder:
-
-0. **Scope guardrail:** Signal 2 says `in_scope=false` **and** zero keyword hits
-   → `out_of_scope` (don't classify a laptop as medicine).
-1. **Qualify:** a candidate survives if a keyword nominated it **or** its vector
-   similarity ≥ `VECTOR_MIN_SIM` (0.30). None survive → abstain.
-2. **Fast path (no LLM):** keyword's **#1** and vector's **#1** are the *same*
-   code, and its similarity ≥ `FASTPATH_MIN_SIM` (0.50) → `classified`,
-   confidence **high**.
-3. **LLM path:** `chat_json` picks one code from the candidate list (schema
-   `hs6` enum = *exactly* the candidate codes + `"abstain"`, so a made-up code
-   is grammatically impossible; re-validated ∈ candidates too) → `classified`,
-   confidence **medium**.
-4. **Abstain:** nothing converged / LLM abstained → `needs_review` + top-3.
+Arbiter decision ladder:
+1. **Scope guardrail** — out-of-scope input with zero keyword hits → `out_of_scope`.
+2. **Qualify** — keep a candidate if a keyword nominated it *or* vector similarity ≥ `VECTOR_MIN_SIM` (0.30).
+3. **Fast path (no LLM)** — keyword #1 and vector #1 agree and similarity ≥ `FASTPATH_MIN_SIM` (0.50) → classify, confidence **high**.
+4. **LLM path** — the model picks one code from the candidate enum → classify, confidence **medium**.
+5. **Abstain** — nothing converged → `needs_review` + top-3 suggestions.
 
 Every path returns the same shape (`decision`, `hs6`, `confidence`, `path`,
-`signals_agreed`, `candidates`, `reason`). `pipeline.classify()` then attaches
-the sourced **card** (`card.build_card`, same joins as `sanity_check.py`):
-`hs_taxonomy` description → `duty_rates` (rate + type + source URL; surfaces the
-"NEEDS ENRICHMENT" warning) → `restrictions_flags` (licence + source URL). The
-card also reports *which signals agreed* — the explainability pitch.
+`signals_agreed`, `candidates`, `reason`), and `classify()` attaches the sourced
+result card.
 
-### Module layout (built)
+---
 
+## Data layer & provenance
+
+Two stores live under `Database/` (both prebuilt and shipped in the repo; every
+script resolves the path via `__file__`, so it runs from any working directory):
+
+- **SQLite** (`Database/tariff_pilot.db`) — the structured/provenance side:
+  `hs_taxonomy` (codes + hand-drafted keyword synonyms), `duty_rates` (WITS
+  averages **plus** USITC/UK national rows; `source_url` required on every row),
+  `restrictions_flags` (licensing law, manually curated with verified citations),
+  and `test_set` (labelled ground truth).
+- **Chroma** (`Database/chroma_db`) — collection `hs_taxonomy`, 384-dim vectors
+  (default `all-MiniLM-L6-v2`), with hs6/chapter/heading/category metadata usable
+  as query-time `where` filters.
+
+Rebuild the data layer from scratch (only needed if you change scope — uncomment
+`sentence-transformers` in `requirements.txt` first):
+
+```bash
+python -m init_database.init_db
+python -m data_ingestion.ingest_taxonomy
+python -m data_ingestion.ingest_wits_rates
+python -m data_ingestion.seed_restrictions_and_tests
+python -m data_ingestion.seed_keywords
+python -m enrich.refresh          # national duty numbers (USA + UK)
+python sanity_check.py            # verify coverage + provenance
 ```
-config.py         # env-driven: LLM/Fireworks backends, thresholds, paths, scope map
-llm/
-  client.py       # chat_json(messages, schema) — local -> Fireworks -> None
-retrieval/
-  signals.py      # keyword_search(q) · toc_route(q) · vector_search(q, scope)
-  arbiter.py      # merge + guardrail + fast path + LLM path + abstain
-  card.py         # hs6 -> sourced result card (SQL joins)
-  pipeline.py     # classify(query, country) — orchestrates the whole chain
-  evaluate.py     # run test_set through classify(), report top-1/top-3
+
+Run `python sanity_check.py` any time for the current coverage report (row counts
++ end-to-end lookups, all with source URLs).
+
+---
+
+## Evaluation
+
+```bash
+python -m tests.evaluate            # all cases
+python -m tests.evaluate 10 --seed 42   # reproducible random batch
 ```
 
-Evaluation: `python -m tests.evaluate` runs all `test_set` rows and prints
-top-1 / top-3 accuracy per category + the decision path per example + a
-hallucination-guard assertion (0 invented codes). This is the demo's accuracy
-number — **top-1 38% / top-3 62% with no LLM served** (keyword+vector only);
-the 3 abstain cases are what Signal 2 + the LLM arbiter will convert.
+Reports top-1 / top-3 accuracy and the decision path per example, plus a
+hallucination-guard assertion (0 invented codes). Test cases live in
+`tests/test.json` — the single source of truth for ground truth.
 
-## 5. Open TODOs (priority order)
+---
 
-**✅ Done since last revision:**
+## Known limitations (upfront)
 
-- ~~Verify the WITS re-run completed~~ — done; `duty_rates` = 205 rows, all 3
-  reporters (EU 74, GBR 70, USA 61). See bug #9.
-- ~~Re-run `seed_restrictions_and_tests.py`~~ — done; `300241` vaccine fix and
-  live ATF `source_url` are in the DB.
-- ~~Extend `restrictions_flags` across the ammunition/parts range~~ — done;
-  now `930621/629/630/690` + `930510/520/591/599` × 3 countries.
-- ~~Add a licence flag for alkaloid (controlled-substance) medicaments~~ — done;
-  `300341–349` + `300441–449` × 3 countries (DEA / UN 1961 / Misuse of Drugs Act).
-- ~~Populate `hs_taxonomy.keywords`~~ — done; 85/85 via `seed_keywords.py`.
-  Signal 1 synonym cases ("shotgun shells"→`930621`, "MRI machine"→`901813`)
-  now resolve; "laptop" still 0 rows (guardrail holds).
+- **EU duties** use the WITS HS-6 average — TARIC has no public JSON API (see
+  `NATIONAL_SOURCES.md`); US/UK have customs-grade national rows.
+- **Section-301** overlays (US Ch.-99, e.g. `9903.88.15`) are surfaced as a note,
+  not yet folded into a computed landed cost.
+- **Restrictions** are manually curated with verified citations (no uniform API
+  for licensing law) — few but trustworthy rows, bounded by scope.
+- The embedding model (`all-MiniLM-L6-v2`) is a solid default; swapping it forces
+  a full re-embed since the vector dimension changes.
 
-**Open (priority order):**
+---
 
-- ~~Build `retrieval/` + `evaluate.py`~~ — done; 3 signals + arbiter + sourced
-  card + eval harness. Baseline top-1 38% / top-3 62% with no LLM (see §4).
-- ~~Enrich `duty_rates` with national numbers (USA + UK)~~ — done; `enrich/`
-  pulls USITC HTS + UK Trade Tariff → 170 national rows with 10-digit codes and
-  Section-301 overlays. EU/TARIC still pending (no JSON API). `python -m
-  enrich.refresh`.
-
-1. **Serve the local LLM** (llama-server per ARCHITECTURE.md) + wire Signal 2
-   and the arbiter's LLM path — the 3 abstain cases should convert; re-run
-   `evaluate.py` to measure the lift. Then build `app/` + `docker/` (Phase 4).
-2. **Real CROSS ruling numbers** into `test_set` (replace `TODO-CROSS`) — each
-   with the ruling's own URL; use the ruling to audit the guessed `correct_hs6`.
-   **Done: 3/8** (`901831`, `901832`, `300490`). **Remaining: 5** (`300241`,
-   `901812`, `930630` ×2, `930690`).
-3. **EU national enrichment** — the one gap left in `duty_rates`: TARIC has no
-   public JSON API, so EU still uses the WITS average. Needs the TARIC3 daily XML
-   export (see `NATIONAL_SOURCES.md`), a larger job than the UK/US REST adapters.
-4. **Landed-cost calculator** handling all three duty shapes (ad valorem /
-   specific / compound). National `ad_valorem` + 10-digit codes are now in place
-   for US/UK; add freight/insurance inputs and the specific/compound arithmetic.
-5. **Change monitoring** — populate `change_log` from the WTO–IMF Tariff Tracker
-   (or a diff step added to `enrich.refresh`, per `NATIONAL_SOURCES.md`).
-6. **Embedding model swap** (MiniLM is a placeholder) — keep the model name in `config.py`; a swap forces full re-embedding.
-
-## 6. Known limitations (be upfront in the demo)
-
-- WITS ad-valorem averages are **HS6 simple averages** — coarse. US/UK now have
-  **customs-grade national rows** (`enrich/`, exact MFN + 10-digit code); EU
-  still uses the WITS average (no TARIC JSON API — TODO #3).
-- US cards carry a **Section 301 note** (Ch. 99 overlay, e.g. `9903.88.15`) in
-  `notes` — surfaced as text, not yet computed into landed cost (TODO #4).
-- Specific/compound duties are handled by the parser but **none occur in the
-  85 in-scope codes** — every national duty here is ad-valorem or Free.
-- Restrictions are **manually curated with verified citations** (there is no
-  uniform API for licensing law). Coverage now spans ammunition, firearm parts,
-  and controlled/alkaloid medicaments across all 3 countries (48 rows), but is
-  still **bounded by scope**: in-scope codes outside those families carry no flag
-  yet. "Curated" = few but verified rows, not unreliable rows.
-- `keywords` are **hand-drafted synonyms** (85/85) — human-skimmable in
-  `seed_keywords.py`; good coverage for lay terms, but not exhaustive. Signal 1
-  is no longer jargon-only.
+*Design notes and the full build history live in `ARCHITECTURE.md`.*

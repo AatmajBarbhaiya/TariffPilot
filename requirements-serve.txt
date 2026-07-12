@@ -1,8 +1,0 @@
-# Backend (serve-time) deps ONLY — see ARCHITECTURE.md §5.
-# Deliberately NO sentence-transformers / torch: query-time embedding is
-# Chroma's built-in ONNX MiniLM. Keeps the image small and the 60s start gate safe.
-fastapi
-uvicorn[standard]
-chromadb
-openai
-requests
