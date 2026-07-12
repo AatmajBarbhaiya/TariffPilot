@@ -81,18 +81,8 @@ def init_sqlite_db():
     );
     """)
 
-    # 4. test_set Table (Ground Truth)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS test_set (
-        example_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product_description TEXT NOT NULL,
-        correct_hs6 TEXT NOT NULL,
-        correct_national_code TEXT,
-        category_tag TEXT CHECK(category_tag IN ('medical', 'ammunition')),
-        ruling_reference TEXT,
-        source_url TEXT NOT NULL
-    );
-    """)
+    # (The ground-truth test set is NOT a DB table — it lives in
+    #  tests/test.json and is run by `python -m tests.evaluate`.)
 
     # Indexes for the hot lookup path (code -> rate for a country)
     cursor.execute(

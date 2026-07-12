@@ -97,37 +97,16 @@ def build_restrictions(conn):
     return rows
 
 
-# --- Ground-truth test set. correct_hs6 mappings are defensible (HS 2022);
-#     ruling_reference must be replaced with a REAL CROSS ruling number. --------
-CROSS_HOME = "https://rulings.cbp.gov"
-TEST_SET = [
-    # (product_description, correct_hs6, national_code, category_tag, ruling_ref, source_url)
-    ("Sterile disposable plastic hypodermic syringes, 5 ml, with needle",
-     "901831", None, "medical", "HQ H343563", "https://rulings.cbp.gov/ruling/H343563"),
-    ("Hypodermic stainless-steel needles for single use, sterile",
-     "901832", None, "medical", "HQ 965580", "https://rulings.cbp.gov/ruling/965580"),
-    ("Medicaments containing amoxicillin, put up in measured doses for retail",
-     "300490", None, "medical", "HQ 963707", "https://rulings.cbp.gov/ruling/963707"),
-    ("Vaccine for human medicine, in single-dose vials",
-     "300241", None, "medical", "TODO-CROSS", CROSS_HOME),
-    ("Diagnostic ultrasonic scanning apparatus (medical)",
-     "901812", None, "medical", "NY J88186", "https://rulings.cbp.gov/ruling/J88186"),
-    ("Centrifugal shotgun cartridges, 12-gauge, lead shot",
-     "930630", None, "ammunition", "TODO-CROSS", CROSS_HOME),
-    ("Rifle cartridges, centerfire, .223 caliber, full metal jacket",
-     "930630", None, "ammunition", "TODO-CROSS", CROSS_HOME),
-    ("Empty cartridge cases of brass for ammunition (parts)",
-     "930690", None, "ammunition", "TODO-CROSS", CROSS_HOME),
-]
+# NOTE: the ground-truth TEST SET now lives in tests/test.json (edit it there)
+# and is run by `python -m tests.evaluate`. It is no longer stored in the DB.
 
 
 def seed():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    # Idempotent: wipe seeded rows first (safe — these tables are seed-only).
+    # Idempotent: wipe seeded rows first (safe — seed-only table).
     cur.execute("DELETE FROM restrictions_flags")
-    cur.execute("DELETE FROM test_set")
 
     restrictions = build_restrictions(conn)
     cur.executemany("""
@@ -136,13 +115,6 @@ def seed():
         VALUES (?, ?, ?, ?, ?)
     """, restrictions)
 
-    cur.executemany("""
-        INSERT INTO test_set
-            (product_description, correct_hs6, correct_national_code,
-             category_tag, ruling_reference, source_url)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, TEST_SET)
-
     conn.commit()
     n_flags = cur.execute(
         'SELECT COUNT(*) FROM restrictions_flags').fetchone()[0]
@@ -150,12 +122,6 @@ def seed():
         'SELECT COUNT(DISTINCT hs6) FROM restrictions_flags').fetchone()[0]
     print(
         f"✓ restrictions_flags: {n_flags} rows across {n_codes} codes x {len(COUNTRIES)} countries")
-    print(
-        f"✓ test_set: {cur.execute('SELECT COUNT(*) FROM test_set').fetchone()[0]} rows")
-    todo = cur.execute(
-        "SELECT COUNT(*) FROM test_set WHERE ruling_reference='TODO-CROSS'").fetchone()[0]
-    if todo:
-        print(f"  ⚠ {todo} test rows still need a REAL CROSS ruling reference.")
     conn.close()
 
 

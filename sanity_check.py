@@ -63,7 +63,7 @@ def coverage():
         ("  specific/compound", "SELECT COUNT(*) FROM duty_rates WHERE duty_type!='ad_valorem'"),
         ("  missing provenance", "SELECT COUNT(*) FROM duty_rates WHERE source_url IS NULL OR source_url=''"),
         ("restrictions_flags", "SELECT COUNT(*) FROM restrictions_flags"),
-        ("test_set", "SELECT COUNT(*) FROM test_set"),
+        # test set moved to tests/test.json (run: python -m tests.evaluate)
     ]:
         print(f"  {label}: {cur.execute(q).fetchone()[0]}")
     conn.close()

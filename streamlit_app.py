@@ -1,16 +1,22 @@
 """
-TariffPilot — test UI (single scrolling page, light theme).
+TariffPilot — front-end UI (single scrolling page, light theme).
 
 Run from the project root:
     conda activate nlp
     streamlit run streamlit_app.py
 
-Layout (single scrolling page, no sidebar, no navbar, light theme):
+  1. Split (containers / production): set BACKEND_URL and this UI becomes THIN —
+     it calls the FastAPI backend over HTTP and does no retrieval itself.
+         BACKEND_URL=http://backend:8000 streamlit run streamlit_app.py
+
+  2. Monolith (quick local dev): leave BACKEND_URL unset and it imports the
+     retrieval pipeline in-process (needs the full deps + Database/ locally).
+         conda activate nlp && streamlit run streamlit_app.py
+
+Layout (no sidebar, no navbar):
   • a lighthearted typewriter welcome types itself (blinking cursor) on first load
   • country + product on one line, robot AI toggle (emoji) centered below, Search
   • the metallic tax-card / invoice renders at the end, after a search
-  • bluish→white gradient background
-Field-level styling + extra amenities come in a later pass (per user).
 """
 import os
 import time
@@ -18,11 +24,14 @@ import time
 import streamlit as st
 
 import config
-from retrieval import classify
 
-# The real key lives in os.environ (loaded from .env by config); capture it so
-# the robot AI toggle can enable/disable Fireworks at runtime without losing it.
+# When set, the UI is thin and everything goes through the backend API.
+BACKEND_URL = os.environ.get("BACKEND_URL", "").rstrip("/")
+
+# Capture the real backend config at startup so the robot AI toggle can turn the
+# WHOLE LLM off (local vLLM + Fireworks) and restore it, without losing values.
 _REAL_KEY = os.environ.get("FIREWORKS_API_KEY", "")
+_REAL_LOCAL_ENABLED = config.LLM.ENABLED
 
 # label shown to the user -> reporter_country code stored in the DB
 COUNTRIES = {
@@ -33,8 +42,38 @@ COUNTRIES = {
 }
 
 WELCOME = (
-    "Take a breath—solving complex HS codes and surprise customs duties is my entire personality. I am your AI tariff assistant, specializing exclusively in medical equipment and ammunition imports across the US, UK, EU, and UAE. While I can navigate trade regulations in seconds, treat my assessments as step one of your two-step verification process, and always double-check the official details before you bet a shipping container on them."
+    "Take a breath—solving complex HS codes and surprise customs duties is my "
+    "entire personality. I am your AI tariff assistant, specializing exclusively "
+    "in medical equipment and ammunition imports across the US, UK, EU, and UAE. "
+    "While I can navigate trade regulations in seconds, treat my assessments as "
+    "step one of your two-step verification process, and always double-check the "
+    "official details before you bet a shipping container on them."
 )
+
+
+# ── data source (HTTP backend, or in-process fallback) ───────────────────────
+def classify_query(query, country, use_llm):
+    """Route a classify request to the backend (thin mode) or the in-process
+    pipeline (monolith). `use_llm` gates the WHOLE LLM (local vLLM + Fireworks)."""
+    if BACKEND_URL:
+        r = requests.post(
+            f"{BACKEND_URL}/api/classify",
+            json={"query": query, "country": country, "use_llm": use_llm},
+            timeout=35,
+        )
+        r.raise_for_status()
+        return r.json()
+    # in-process monolith — import lazily so the thin UI image (no retrieval
+    # deps) never touches these when BACKEND_URL is set.
+    from retrieval import classify
+    if use_llm:
+        config.LLM.ENABLED = _REAL_LOCAL_ENABLED
+        config.FIREWORKS.API_KEY = _REAL_KEY
+    else:
+        config.LLM.ENABLED = False
+        config.FIREWORKS.API_KEY = ""
+    return classify(query, country)
+
 
 st.set_page_config(page_title="TariffPilot", page_icon="🤖", layout="wide")
 
@@ -42,12 +81,12 @@ st.set_page_config(page_title="TariffPilot", page_icon="🤖", layout="wide")
 st.session_state.setdefault("result", None)
 st.session_state.setdefault("country_label", list(COUNTRIES)[0])
 st.session_state.setdefault("typed", False)
-st.session_state.setdefault("ai_on", bool(_REAL_KEY))
+st.session_state.setdefault("ai_on", _REAL_LOCAL_ENABLED or bool(_REAL_KEY))
 
 
 # ── theming ──────────────────────────────────────────────────────────────────
 def inject_css(ai_on):
-    # light theme only (dark mode removed)
+    # light theme only
     bg = "linear-gradient(160deg,#d7e6fb 0%,#eef5ff 55%,#ffffff 100%)"
     text, muted = "#12243f", "rgba(18,36,63,.62)"
     accent = "#1f6feb"
@@ -154,23 +193,17 @@ def welcome_block():
 
 # ── HOME ─────────────────────────────────────────────────────────────────────
 def robot_toggle():
-    """The emoji itself is the toggle: 🤖 eyes-open (AI on) ↔ 😴 blinking (AI off)."""
+    """The emoji itself is the toggle: 🤖 eyes-open (AI on) ↔ 😴 blinking (AI off).
+    Purely UI state — the gating is applied at search time in classify_query()."""
     ai_on = st.session_state.ai_on
-
-    # Added use_container_width=True to stretch the button and auto-center the emoji!
     if st.button("🤖" if ai_on else "😴", key="ai_emoji",
                  help="Toggle the AI (LLM). Off = free keyword + vector only.",
                  use_container_width=True):
         st.session_state.ai_on = not ai_on
         st.rerun()
 
-    caption_text = 'AI on · I see all' if ai_on else 'AI off · Going Blind'
-    st.markdown(
-        f"<div class='botcap' style='text-align: center; margin-top: -15px; margin-bottom: 15px; font-size: 0.85em; color: #888;'>"
-        f"{caption_text}</div>",
-        unsafe_allow_html=True
-    )
-    config.FIREWORKS.API_KEY = _REAL_KEY if st.session_state.ai_on else ""
+    caption_text = "AI on · I see all" if ai_on else "AI off · Going Blind"
+    st.markdown(f"<div class='botcap'>{caption_text}</div>", unsafe_allow_html=True)
 
 
 def page_home():
@@ -187,7 +220,6 @@ def page_home():
                           placeholder="e.g. sterile disposable syringes, 5 ml")
 
     # LLM toggle emoji, centered, below the line
-    # Changed from [2, 1, 2] to [3, 2, 3] to give the caption text enough room so it never wraps or overflows
     _, mid, _ = st.columns([3, 2, 3])
     with mid:
         robot_toggle()
@@ -199,9 +231,15 @@ def page_home():
 
     if go and query.strip():
         with st.spinner("Assessing…"):
-            result = classify(query, COUNTRIES[country_label])
-        st.session_state.result = result
-        st.session_state.country_label = country_label
+            try:
+                result = classify_query(query, COUNTRIES[country_label],
+                                        st.session_state.ai_on)
+            except requests.RequestException as e:
+                st.error(f"Backend unreachable: {e}")
+                result = None
+        if result:
+            st.session_state.result = result
+            st.session_state.country_label = country_label
     elif go:
         st.info("Type a product description first 🙂")
 
@@ -215,8 +253,7 @@ def metallic_invoice(r, country_label):
     card = r["card"]
     duty = card.get("duty") or {}
     rate = f"{duty.get('ad_valorem_rate')}%" if duty else "—"
-    stamp = {"high": "#2e7d32", "medium": "#b26a00"}.get(
-        r["confidence"], "#777")
+    stamp = {"high": "#2e7d32", "medium": "#b26a00"}.get(r["confidence"], "#777")
 
     rows = _row("HS code", card["hs6"])
     rows += _row("Description", (card["description"] or "")[:70])

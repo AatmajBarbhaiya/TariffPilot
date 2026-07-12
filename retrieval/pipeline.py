@@ -18,6 +18,7 @@ def classify(query, country="USA"):
     if not query:
         return {"query": query, "country": country, "decision": "out_of_scope",
                 "hs6": None, "confidence": "low", "path": "empty",
+                "source": "keyword+vector",
                 "signals_agreed": [], "candidates": [], "card": None,
                 "reason": "Empty query."}
 

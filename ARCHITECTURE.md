@@ -332,7 +332,7 @@ fine), the request body, the response envelope — is identical to Fireworks.
    500**.
 4. **Grammar guarantee** — arbiter enum = candidate list; `evaluate.py` asserts
    every returned/candidate hs6 ∈ taxonomy across all test rows (guard = 0).
-5. **Accuracy number** — `python -m retrieval.evaluate` prints top-1/top-3 per
+5. **Accuracy number** — `python -m tests.evaluate` prints top-1/top-3 per
    category. This is the demo metric.
 6. **VRAM headroom** (AMD box) — `rocm-smi` stays within budget during a
    classify burst; no OOM on model load at `--gpu-memory-utilization 0.90`.
