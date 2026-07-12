@@ -1,5 +1,5 @@
 """
-TariffPilot backend API (ARCHITECTURE.md §2, §7).
+TariffPilot backend API.
 
 Wraps the retrieval pipeline behind HTTP so the Streamlit UI *and* the hackathon
 judge talk to it over the network instead of importing it in-process. The

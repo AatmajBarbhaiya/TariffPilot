@@ -142,7 +142,7 @@ it orchestrates the whole chain. Follow it in this order:
 
 External-service keys are **never committed** — `config.py` reads them from the
 environment / a git-ignored `.env`. EU national duties have no public JSON API
-(TARIC), so EU falls back to the WITS average — documented in `NATIONAL_SOURCES.md`.
+(TARIC), so EU falls back to the WITS average.
 
 ---
 
@@ -226,15 +226,11 @@ hallucination-guard assertion (0 invented codes). Test cases live in
 
 ## Known limitations (upfront)
 
-- **EU duties** use the WITS HS-6 average — TARIC has no public JSON API (see
-  `NATIONAL_SOURCES.md`); US/UK have customs-grade national rows.
+- **EU duties** use the WITS HS-6 average — TARIC has no public JSON API;
+  US/UK have customs-grade national rows.
 - **Section-301** overlays (US Ch.-99, e.g. `9903.88.15`) are surfaced as a note,
   not yet folded into a computed landed cost.
 - **Restrictions** are manually curated with verified citations (no uniform API
   for licensing law) — few but trustworthy rows, bounded by scope.
 - The embedding model (`all-MiniLM-L6-v2`) is a solid default; swapping it forces
   a full re-embed since the vector dimension changes.
-
----
-
-*Design notes and the full build history live in `ARCHITECTURE.md`.*

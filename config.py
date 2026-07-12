@@ -1,6 +1,6 @@
 """
 Central configuration — everything env-driven so the same code runs on a laptop,
-the AMD box, or against Fireworks with no edits. See ARCHITECTURE.md §5/§6.
+the AMD box, or against Fireworks with no edits.
 
 Nothing here imports heavy deps; safe to import from anywhere.
 
@@ -42,11 +42,10 @@ def _env(name, default=""):
 
 
 # --- LLM backends -----------------------------------------------------------
-# Local llama-server (OpenAI-compatible) is tried first; Fireworks is the
+# Local vLLM server (OpenAI-compatible) is tried first; Fireworks is the
 # fallback. Either can be the sole backend depending on which envs are set.
 class LLM:
-    # Local llama.cpp server (see ARCHITECTURE.md §4). api_key is a dummy —
-    # llama-server ignores auth.
+    # Local vLLM server. api_key is a dummy — vLLM ignores auth.
     BASE_URL = _env("LLM_BASE_URL", "http://localhost:8080/v1")
     MODEL = _env("LLM_MODEL", "local")
     API_KEY = _env("LLM_API_KEY", "sk-noauth")

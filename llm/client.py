@@ -1,13 +1,13 @@
 """
 One LLM entry point for the whole app: `chat_json(messages, schema)`.
 
-Backend chain (ARCHITECTURE.md §6): local llama-server -> Fireworks -> None.
+Backend chain: local vLLM -> Fireworks -> None.
 - Each backend is tried in turn; the first that returns parseable JSON wins.
 - If none is reachable/configured, returns None and the CALLER degrades
   gracefully (Signal 2 skips its filter; the Arbiter abstains). The pipeline
   must never crash because the LLM is down.
 
-JSON is requested via OpenAI `response_format=json_schema` (llama-server enforces
+JSON is requested via OpenAI `response_format=json_schema` (vLLM enforces
 it at the sampler as a grammar; Fireworks honours it too). We ALSO parse
 defensively so a backend that only supports `json_object` still works.
 """
