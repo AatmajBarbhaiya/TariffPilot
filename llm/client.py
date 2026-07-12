@@ -66,7 +66,10 @@ def _call(base_url, api_key, model, messages, schema, timeout, max_retries):
         model=model,
         messages=messages,
         temperature=0,
-        max_tokens=512,
+        # gpt-oss is a REASONING model: reasoning tokens count toward the budget
+        # and are emitted before the final JSON. 512 can truncate the answer to
+        # empty -> false fallback. 2048 gives the reasoning room + the tiny JSON.
+        max_tokens=2048,
         response_format={
             "type": "json_schema",
             "json_schema": {"name": "response", "schema": schema, "strict": True},
