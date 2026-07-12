@@ -118,10 +118,16 @@ def inject_css(ai_on):
                 font-size:2rem; font-weight:800; letter-spacing:-.5px;
                 color:{text}; margin-bottom:.6rem; }}
 
-      /* welcome paragraph — Space Grotesk display */
-      .welcome {{ font-family:'Space Grotesk',-apple-system,system-ui,sans-serif;
-                  font-size:32px; line-height:1.08; font-weight:700;
-                  letter-spacing:-1px; color:{text}; }}
+      /* welcome paragraph — Space Grotesk display.
+         Ghost/overlay trick: an invisible full-text copy reserves the TRUE
+         final height (via the browser's own wrapping) so the layout below
+         never shifts as the visible copy types itself out on top of it. */
+      .welcome-wrap {{ position:relative; }}
+      .welcome-text {{ font-family:'Space Grotesk',-apple-system,system-ui,sans-serif;
+                       font-size:32px; line-height:1.08; font-weight:700;
+                       letter-spacing:-1px; color:{text}; }}
+      .welcome-ghost {{ visibility:hidden; }}
+      .welcome-live {{ position:absolute; top:0; left:0; width:100%; }}
       .cursor {{ color:{accent}; font-weight:400;
                  animation: blink 1s steps(1) infinite; }}
       @keyframes blink {{ 50% {{ opacity:0; }} }}
@@ -177,22 +183,42 @@ def inject_css(ai_on):
 
 
 # ── typewriter welcome (blinking cursor, first load only) ────────────────────
-def welcome_block():
+def _welcome_html(current_text):
+    """Ghost/overlay markup: an invisible copy of the FULL text reserves the
+    real final height (browser-computed, not guessed), while the visible
+    `current_text` (growing as it types) sits absolutely-positioned on top —
+    so nothing below this block ever shifts as the animation progresses."""
     nl = chr(10)
+    ghost = WELCOME.replace(nl, "<br>")
+    live = current_text.replace(nl, "<br>")
+    return (f"<div class='welcome-wrap'>"
+            f"<div class='welcome-text welcome-ghost' aria-hidden='true'>{ghost}</div>"
+            f"<div class='welcome-text welcome-live'>{live}<span class='cursor'>|</span></div>"
+            f"</div>")
+
+
+def welcome_placeholder():
+    """Reserve the welcome paragraph's position in the layout NOW (empty for
+    the moment) so widgets placed after this call still render immediately —
+    the typing animation is filled in later, via animate_welcome()."""
+    return st.empty()
+
+
+def animate_welcome(ph):
+    """Type WELCOME into `ph` character by character (first load only, with a
+    blinking cursor); static render on later reruns. Call this AFTER the rest
+    of the page's widgets so the sleep-based animation doesn't block them from
+    reaching the browser first."""
     if not st.session_state.typed:
-        ph = st.empty()
         acc = ""
         for ch in WELCOME:
             acc += ch
-            ph.markdown(f"<div class='welcome'>{acc.replace(nl, '<br>')}"
-                        f"<span class='cursor'>|</span></div>", unsafe_allow_html=True)
+            ph.markdown(_welcome_html(acc), unsafe_allow_html=True)
             time.sleep(0.015)
         st.session_state.typed = True
-        ph.markdown(f"<div class='welcome'>{WELCOME.replace(nl, '<br>')}"
-                    f"<span class='cursor'>|</span></div>", unsafe_allow_html=True)
+        ph.markdown(_welcome_html(WELCOME), unsafe_allow_html=True)
     else:
-        st.markdown(f"<div class='welcome'>{WELCOME.replace(nl, '<br>')}"
-                    f"<span class='cursor'>|</span></div>", unsafe_allow_html=True)
+        ph.markdown(_welcome_html(WELCOME), unsafe_allow_html=True)
 
 
 # ── HOME ─────────────────────────────────────────────────────────────────────
@@ -212,10 +238,11 @@ def robot_toggle():
 
 def page_home():
     st.markdown("<div class='brand'>📦 TariffPilot</div>", unsafe_allow_html=True)
-    welcome_block()
+    welcome_ph = welcome_placeholder()   # reserve the paragraph's slot now
     st.write("")
 
-    # country + product description on the same line
+    # country + product description on the same line — these render
+    # immediately, while the welcome paragraph above is still typing.
     c1, c2 = st.columns([1, 3])
     country_label = c1.selectbox(
         "Importing country", list(COUNTRIES),
@@ -232,6 +259,10 @@ def page_home():
 
     st.caption("Try:  shotgun shells 12 gauge  ·  MRI scanner  ·  "
                "vaccine for human medicine  ·  laptop (out of scope)")
+
+    # NOW animate the paragraph into its reserved slot above — all the
+    # widgets above are already live in the browser at this point.
+    animate_welcome(welcome_ph)
 
     if go and query.strip():
         with st.spinner("Assessing…"):
