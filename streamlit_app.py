@@ -22,6 +22,7 @@ import os
 import re
 import time
 
+import requests
 import streamlit as st
 
 import config
