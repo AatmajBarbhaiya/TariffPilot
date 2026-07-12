@@ -18,6 +18,7 @@ Layout (no sidebar, no navbar):
   • country + product on one line, robot AI toggle (emoji) centered below, Search
   • the metallic tax-card / invoice renders at the end, after a search
 """
+import html
 import os
 import re
 import time
@@ -35,13 +36,29 @@ BACKEND_URL = os.environ.get("BACKEND_URL", "").rstrip("/")
 _REAL_KEY = os.environ.get("FIREWORKS_API_KEY", "")
 _REAL_LOCAL_ENABLED = config.LLM.ENABLED
 
-# label shown to the user -> reporter_country code stored in the DB
+# label shown to the user -> reporter_country code stored in the DB.
+# NOTE: st.selectbox renders option labels as PLAIN TEXT (no HTML/CSS) — flag
+# emoji here would only ever render via the viewer's OS/browser font, which is
+# unreliable on minimal Linux installs (e.g. a headless AMD server). Real flag
+# ICONS (image-based, render identically everywhere) are added separately via
+# _flag_span() wherever we control raw HTML below.
 COUNTRIES = {
-    "🇺🇸 USA": "USA",
-    "🇬🇧 UK": "GBR",
-    "🇪🇺 EU": "EU",
-    "🇦🇪 UAE": "ARE",
+    "USA": "USA",
+    "UK": "GBR",
+    "EU": "EU",
+    "UAE": "ARE",
 }
+
+# reporter_country -> flag-icons CSS class (ISO 3166-1 alpha-2; 'eu' is a
+# flag-icons special-case for the EU flag).
+COUNTRY_FLAG = {"USA": "us", "GBR": "gb", "EU": "eu", "ARE": "ae"}
+
+
+def _flag_span(country_code):
+    """Image-based flag icon (flag-icons CDN) — renders the same on every
+    OS/browser, unlike emoji flags which depend on the viewer's font stack."""
+    cls = COUNTRY_FLAG.get(country_code, "")
+    return f"<span class='fi fi-{cls}' title='{country_code}'></span> " if cls else ""
 
 WELCOME = (
     "Take a breath—solving complex HS codes and surprise customs duties is my "
@@ -99,6 +116,7 @@ def inject_css(ai_on):
     st.markdown(f"""
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+      @import url('https://cdn.jsdelivr.net/npm/flag-icons@7/css/flag-icons.min.css');
       /* strip Streamlit chrome */
       [data-testid="stSidebar"], [data-testid="collapsedControl"] {{ display:none !important; }}
       [data-testid="stHeader"] {{ display:none !important; }}
@@ -178,6 +196,17 @@ def inject_css(ai_on):
       .tax-card.empty, .tax-card.review {{
         background: linear-gradient(135deg,#e9ebee,#cfd3d7);
         font-family: inherit; text-align:center; padding:38px 34px; }}
+
+      /* image-based flag icons (flag-icons CDN) — sized to sit inline with text */
+      .fi {{ display:inline-block; vertical-align:-2px; width:1.15em; height:.85em;
+             border-radius:2px; box-shadow:0 0 0 1px rgba(0,0,0,.12); }}
+
+      /* "why" candidate table — plain HTML (not st.dataframe) so descriptions
+         can truncate with an ellipsis and show the full text on hover. */
+      .why-table {{ width:100%; border-collapse:collapse; font-size:.85rem; color:{text}; }}
+      .why-table th, .why-table td {{ text-align:left; padding:6px 10px;
+             border-bottom:1px solid rgba(0,0,0,.12); }}
+      .why-table td span[title] {{ cursor:help; border-bottom:1px dotted rgba(0,0,0,.35); }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -280,6 +309,18 @@ def page_home():
 
 
 # ── CARD ─────────────────────────────────────────────────────────────────────
+def _trunc(text, limit=70):
+    """Truncate with a trailing '…'; the FULL text shows as a native browser
+    tooltip on hover (title attr — no JS). Short text passes through unchanged
+    (still HTML-escaped either way)."""
+    text = text or ""
+    escaped = html.escape(text)
+    if len(text) <= limit:
+        return escaped
+    short = html.escape(text[:limit].rstrip())
+    return f"<span title='{escaped}'>{short}…</span>"
+
+
 def _row(k, v):
     return f"<div class='tc-row'><span class='tc-k'>{k}</span><span class='tc-v'>{v}</span></div>"
 
@@ -319,9 +360,10 @@ def metallic_invoice(r, country_label):
     duty = card.get("duty") or {}
     rate = _format_duty(duty)
     stamp = {"high": "#2e7d32", "medium": "#b26a00"}.get(r["confidence"], "#777")
+    country_code = COUNTRIES.get(country_label, "")
 
     rows = _row("HS code", card["hs6"])
-    rows += _row("Description", (card["description"] or "")[:70])
+    rows += _row("Description", _trunc(card["description"], 70))
     rows += _row("Category", card["category"])
     if duty.get("national_code"):
         rows += _row("National line", duty["national_code"])
@@ -342,7 +384,7 @@ def metallic_invoice(r, country_label):
     <div class='tax-card'>
       <div class='tc-head'>
         <div><div class='tc-title'>TARIFF ASSESSMENT</div>
-             <div class='tc-sub'>Ref #{card['hs6']} · {country_label}</div></div>
+             <div class='tc-sub'>Ref #{card['hs6']} · {_flag_span(country_code)}{country_label}</div></div>
         <div class='tc-stamp' style='color:{stamp};border-color:{stamp}'>
              {r['confidence'].upper()} · {r['path']}</div>
       </div>
@@ -360,8 +402,10 @@ def page_card():
         return                      # nothing to show until the first search
 
     country_label = st.session_state.country_label
+    country_code = COUNTRIES.get(country_label, "")
     st.write("")
-    st.markdown(f"#### Importing into: {country_label}")
+    st.markdown(f"#### {_flag_span(country_code)}Importing into: {country_label}",
+                unsafe_allow_html=True)
 
     if r["decision"] == "classified" and r.get("card"):
         st.markdown(metallic_invoice(r, country_label), unsafe_allow_html=True)
@@ -375,14 +419,23 @@ def page_card():
 
     if r.get("candidates"):
         with st.expander("🔍 Why — candidate signals"):
-            st.dataframe(
-                [{"hs6": c["hs6"], "signals": ", ".join(c["signals"]),
-                  "keyword": round(c["keyword_score"], 2),
-                  "vector_sim": round(c["vector_similarity"], 3),
-                  "description": (c["description"] or "")[:60]}
-                 for c in r["candidates"]],
-                hide_index=True, use_container_width=True,
+            # plain HTML table (not st.dataframe) so the description column can
+            # truncate with an ellipsis and show the full text on hover.
+            rows_html = "".join(
+                f"<tr><td>{html.escape(c['hs6'])}</td>"
+                f"<td>{html.escape(', '.join(c['signals']))}</td>"
+                f"<td>{round(c['keyword_score'], 2)}</td>"
+                f"<td>{round(c['vector_similarity'], 3)}</td>"
+                f"<td>{_trunc(c['description'], 60)}</td></tr>"
+                for c in r["candidates"]
             )
+            st.markdown(f"""
+            <table class='why-table'>
+              <thead><tr><th>hs6</th><th>signals</th><th>keyword</th>
+                         <th>vector_sim</th><th>description (hover for full)</th></tr></thead>
+              <tbody>{rows_html}</tbody>
+            </table>
+            """, unsafe_allow_html=True)
 
 
 # ── render ───────────────────────────────────────────────────────────────────
