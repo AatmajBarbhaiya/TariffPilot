@@ -18,6 +18,7 @@ Layout (no sidebar, no navbar):
   • country + product on one line, robot AI toggle (emoji) centered below, Search
   • the metallic tax-card / invoice renders at the end, after a search
 """
+import html
 import os
 import re
 import time
@@ -35,13 +36,29 @@ BACKEND_URL = os.environ.get("BACKEND_URL", "").rstrip("/")
 _REAL_KEY = os.environ.get("FIREWORKS_API_KEY", "")
 _REAL_LOCAL_ENABLED = config.LLM.ENABLED
 
-# label shown to the user -> reporter_country code stored in the DB
+# label shown to the user -> reporter_country code stored in the DB.
+# NOTE: st.selectbox renders option labels as PLAIN TEXT (no HTML/CSS) — flag
+# emoji here would only ever render via the viewer's OS/browser font, which is
+# unreliable on minimal Linux installs (e.g. a headless AMD server). Real flag
+# ICONS (image-based, render identically everywhere) are added separately via
+# _flag_span() wherever we control raw HTML below.
 COUNTRIES = {
-    "🇺🇸 USA": "USA",
-    "🇬🇧 UK": "GBR",
-    "🇪🇺 EU": "EU",
-    "🇦🇪 UAE": "ARE",
+    "USA": "USA",
+    "UK": "GBR",
+    "EU": "EU",
+    "UAE": "ARE",
 }
+
+# reporter_country -> flag-icons CSS class (ISO 3166-1 alpha-2; 'eu' is a
+# flag-icons special-case for the EU flag).
+COUNTRY_FLAG = {"USA": "us", "GBR": "gb", "EU": "eu", "ARE": "ae"}
+
+
+def _flag_span(country_code):
+    """Image-based flag icon (flag-icons CDN) — renders the same on every
+    OS/browser, unlike emoji flags which depend on the viewer's font stack."""
+    cls = COUNTRY_FLAG.get(country_code, "")
+    return f"<span class='fi fi-{cls}' title='{country_code}'></span> " if cls else ""
 
 WELCOME = (
     "Take a breath—solving complex HS codes and surprise customs duties is my "
@@ -99,6 +116,7 @@ def inject_css(ai_on):
     st.markdown(f"""
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+      @import url('https://cdn.jsdelivr.net/npm/flag-icons@7/css/flag-icons.min.css');
       /* strip Streamlit chrome */
       [data-testid="stSidebar"], [data-testid="collapsedControl"] {{ display:none !important; }}
       [data-testid="stHeader"] {{ display:none !important; }}
@@ -118,10 +136,16 @@ def inject_css(ai_on):
                 font-size:2rem; font-weight:800; letter-spacing:-.5px;
                 color:{text}; margin-bottom:.6rem; }}
 
-      /* welcome paragraph — Space Grotesk display */
-      .welcome {{ font-family:'Space Grotesk',-apple-system,system-ui,sans-serif;
-                  font-size:32px; line-height:1.08; font-weight:700;
-                  letter-spacing:-1px; color:{text}; }}
+      /* welcome paragraph — Space Grotesk display.
+         Ghost/overlay trick: an invisible full-text copy reserves the TRUE
+         final height (via the browser's own wrapping) so the layout below
+         never shifts as the visible copy types itself out on top of it. */
+      .welcome-wrap {{ position:relative; }}
+      .welcome-text {{ font-family:'Space Grotesk',-apple-system,system-ui,sans-serif;
+                       font-size:32px; line-height:1.08; font-weight:700;
+                       letter-spacing:-1px; color:{text}; }}
+      .welcome-ghost {{ visibility:hidden; }}
+      .welcome-live {{ position:absolute; top:0; left:0; width:100%; }}
       .cursor {{ color:{accent}; font-weight:400;
                  animation: blink 1s steps(1) infinite; }}
       @keyframes blink {{ 50% {{ opacity:0; }} }}
@@ -172,27 +196,58 @@ def inject_css(ai_on):
       .tax-card.empty, .tax-card.review {{
         background: linear-gradient(135deg,#e9ebee,#cfd3d7);
         font-family: inherit; text-align:center; padding:38px 34px; }}
+
+      /* image-based flag icons (flag-icons CDN) — sized to sit inline with text */
+      .fi {{ display:inline-block; vertical-align:-2px; width:1.15em; height:.85em;
+             border-radius:2px; box-shadow:0 0 0 1px rgba(0,0,0,.12); }}
+
+      /* "why" candidate table — plain HTML (not st.dataframe) so descriptions
+         can truncate with an ellipsis and show the full text on hover. */
+      .why-table {{ width:100%; border-collapse:collapse; font-size:.85rem; color:{text}; }}
+      .why-table th, .why-table td {{ text-align:left; padding:6px 10px;
+             border-bottom:1px solid rgba(0,0,0,.12); }}
+      .why-table td span[title] {{ cursor:help; border-bottom:1px dotted rgba(0,0,0,.35); }}
     </style>
     """, unsafe_allow_html=True)
 
 
 # ── typewriter welcome (blinking cursor, first load only) ────────────────────
-def welcome_block():
+def _welcome_html(current_text):
+    """Ghost/overlay markup: an invisible copy of the FULL text reserves the
+    real final height (browser-computed, not guessed), while the visible
+    `current_text` (growing as it types) sits absolutely-positioned on top —
+    so nothing below this block ever shifts as the animation progresses."""
     nl = chr(10)
+    ghost = WELCOME.replace(nl, "<br>")
+    live = current_text.replace(nl, "<br>")
+    return (f"<div class='welcome-wrap'>"
+            f"<div class='welcome-text welcome-ghost' aria-hidden='true'>{ghost}</div>"
+            f"<div class='welcome-text welcome-live'>{live}<span class='cursor'>|</span></div>"
+            f"</div>")
+
+
+def welcome_placeholder():
+    """Reserve the welcome paragraph's position in the layout NOW (empty for
+    the moment) so widgets placed after this call still render immediately —
+    the typing animation is filled in later, via animate_welcome()."""
+    return st.empty()
+
+
+def animate_welcome(ph):
+    """Type WELCOME into `ph` character by character (first load only, with a
+    blinking cursor); static render on later reruns. Call this AFTER the rest
+    of the page's widgets so the sleep-based animation doesn't block them from
+    reaching the browser first."""
     if not st.session_state.typed:
-        ph = st.empty()
         acc = ""
         for ch in WELCOME:
             acc += ch
-            ph.markdown(f"<div class='welcome'>{acc.replace(nl, '<br>')}"
-                        f"<span class='cursor'>|</span></div>", unsafe_allow_html=True)
+            ph.markdown(_welcome_html(acc), unsafe_allow_html=True)
             time.sleep(0.015)
         st.session_state.typed = True
-        ph.markdown(f"<div class='welcome'>{WELCOME.replace(nl, '<br>')}"
-                    f"<span class='cursor'>|</span></div>", unsafe_allow_html=True)
+        ph.markdown(_welcome_html(WELCOME), unsafe_allow_html=True)
     else:
-        st.markdown(f"<div class='welcome'>{WELCOME.replace(nl, '<br>')}"
-                    f"<span class='cursor'>|</span></div>", unsafe_allow_html=True)
+        ph.markdown(_welcome_html(WELCOME), unsafe_allow_html=True)
 
 
 # ── HOME ─────────────────────────────────────────────────────────────────────
@@ -212,10 +267,11 @@ def robot_toggle():
 
 def page_home():
     st.markdown("<div class='brand'>📦 TariffPilot</div>", unsafe_allow_html=True)
-    welcome_block()
+    welcome_ph = welcome_placeholder()   # reserve the paragraph's slot now
     st.write("")
 
-    # country + product description on the same line
+    # country + product description on the same line — these render
+    # immediately, while the welcome paragraph above is still typing.
     c1, c2 = st.columns([1, 3])
     country_label = c1.selectbox(
         "Importing country", list(COUNTRIES),
@@ -233,6 +289,10 @@ def page_home():
     st.caption("Try:  shotgun shells 12 gauge  ·  MRI scanner  ·  "
                "vaccine for human medicine  ·  laptop (out of scope)")
 
+    # NOW animate the paragraph into its reserved slot above — all the
+    # widgets above are already live in the browser at this point.
+    animate_welcome(welcome_ph)
+
     if go and query.strip():
         with st.spinner("Assessing…"):
             try:
@@ -249,6 +309,18 @@ def page_home():
 
 
 # ── CARD ─────────────────────────────────────────────────────────────────────
+def _trunc(text, limit=70):
+    """Truncate with a trailing '…'; the FULL text shows as a native browser
+    tooltip on hover (title attr — no JS). Short text passes through unchanged
+    (still HTML-escaped either way)."""
+    text = text or ""
+    escaped = html.escape(text)
+    if len(text) <= limit:
+        return escaped
+    short = html.escape(text[:limit].rstrip())
+    return f"<span title='{escaped}'>{short}…</span>"
+
+
 def _row(k, v):
     return f"<div class='tc-row'><span class='tc-k'>{k}</span><span class='tc-v'>{v}</span></div>"
 
@@ -288,9 +360,10 @@ def metallic_invoice(r, country_label):
     duty = card.get("duty") or {}
     rate = _format_duty(duty)
     stamp = {"high": "#2e7d32", "medium": "#b26a00"}.get(r["confidence"], "#777")
+    country_code = COUNTRIES.get(country_label, "")
 
     rows = _row("HS code", card["hs6"])
-    rows += _row("Description", (card["description"] or "")[:70])
+    rows += _row("Description", _trunc(card["description"], 70))
     rows += _row("Category", card["category"])
     if duty.get("national_code"):
         rows += _row("National line", duty["national_code"])
@@ -311,7 +384,7 @@ def metallic_invoice(r, country_label):
     <div class='tax-card'>
       <div class='tc-head'>
         <div><div class='tc-title'>TARIFF ASSESSMENT</div>
-             <div class='tc-sub'>Ref #{card['hs6']} · {country_label}</div></div>
+             <div class='tc-sub'>Ref #{card['hs6']} · {_flag_span(country_code)}{country_label}</div></div>
         <div class='tc-stamp' style='color:{stamp};border-color:{stamp}'>
              {r['confidence'].upper()} · {r['path']}</div>
       </div>
@@ -329,8 +402,10 @@ def page_card():
         return                      # nothing to show until the first search
 
     country_label = st.session_state.country_label
+    country_code = COUNTRIES.get(country_label, "")
     st.write("")
-    st.markdown(f"#### Importing into: {country_label}")
+    st.markdown(f"#### {_flag_span(country_code)}Importing into: {country_label}",
+                unsafe_allow_html=True)
 
     if r["decision"] == "classified" and r.get("card"):
         st.markdown(metallic_invoice(r, country_label), unsafe_allow_html=True)
@@ -344,14 +419,23 @@ def page_card():
 
     if r.get("candidates"):
         with st.expander("🔍 Why — candidate signals"):
-            st.dataframe(
-                [{"hs6": c["hs6"], "signals": ", ".join(c["signals"]),
-                  "keyword": round(c["keyword_score"], 2),
-                  "vector_sim": round(c["vector_similarity"], 3),
-                  "description": (c["description"] or "")[:60]}
-                 for c in r["candidates"]],
-                hide_index=True, use_container_width=True,
+            # plain HTML table (not st.dataframe) so the description column can
+            # truncate with an ellipsis and show the full text on hover.
+            rows_html = "".join(
+                f"<tr><td>{html.escape(c['hs6'])}</td>"
+                f"<td>{html.escape(', '.join(c['signals']))}</td>"
+                f"<td>{round(c['keyword_score'], 2)}</td>"
+                f"<td>{round(c['vector_similarity'], 3)}</td>"
+                f"<td>{_trunc(c['description'], 60)}</td></tr>"
+                for c in r["candidates"]
             )
+            st.markdown(f"""
+            <table class='why-table'>
+              <thead><tr><th>hs6</th><th>signals</th><th>keyword</th>
+                         <th>vector_sim</th><th>description (hover for full)</th></tr></thead>
+              <tbody>{rows_html}</tbody>
+            </table>
+            """, unsafe_allow_html=True)
 
 
 # ── render ───────────────────────────────────────────────────────────────────
