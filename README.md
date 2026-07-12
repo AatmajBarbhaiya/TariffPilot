@@ -8,6 +8,14 @@ government URL each figure came from. The reasoning step runs on a **self-hosted
 LLM on an AMD Instinct MI300X** (vLLM on ROCm), with Fireworks as an optional
 cloud fallback.
 
+## 🔗 Live demo
+
+**👉 [http://134.199.196.55:8501/](http://134.199.196.55:8501/)**
+
+The full stack is already running on the AMD Instinct MI300X — just open the link
+and try a query (e.g. `whisky` → USA, or `MRI machine` → UK). No setup required.
+The instructions below are only needed to run it yourself.
+
 > **Scope:** 4 product families — **Medical** (HS Ch. 30 + headings 9018–9022),
 > **Arms & Ammunition** (9305, 9306), **Watches** (9101, 9102), **Spirits &
 > Liqueurs** (2208) — across **4 markets**: **USA · UK · EU · UAE**.
@@ -52,6 +60,10 @@ suggestion list. AMD-served LLM is the quality path, not a hard dependency.
 ---
 
 ## Quickstart
+
+> **Judging?** You don't need any of this — the app is live at
+> **[http://134.199.196.55:8501/](http://134.199.196.55:8501/)**. This section is
+> for running it on your own machine or your own AMD box.
 
 ### Option A — run locally (monolith)
 
