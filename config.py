@@ -103,6 +103,9 @@ SCOPE_HEADINGS = {
     "9022": "x-ray & ionising-radiation apparatus",
     "9305": "parts & accessories of firearms",
     "9306": "ammunition & parts",
+    "9101": "wrist/pocket watches, precious-metal case",
+    "9102": "wrist/pocket watches, other case",
+    "2208": "spirits & liqueurs (whisky, vodka, gin, rum, etc.)",
 }
 
 # Valid heading/chapter sets used to sanity-check LLM output + build filters.

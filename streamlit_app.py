@@ -17,6 +17,7 @@ Layout (no sidebar, no navbar):
   • the metallic tax-card / invoice renders at the end, after a search
 """
 import os
+import re
 import time
 
 import requests
@@ -154,9 +155,11 @@ def inject_css(ai_on):
       .tc-row {{ display:flex; justify-content:space-between; padding:7px 0;
                 border-bottom:1px dashed rgba(0,0,0,.18); }}
       .tc-k {{ opacity:.72; }}  .tc-v {{ font-weight:700; text-align:right; }}
-      .tc-total {{ display:flex; justify-content:space-between; margin-top:14px;
-                  padding-top:12px; border-top:2px solid rgba(0,0,0,.35);
+      .tc-total {{ display:flex; justify-content:space-between; gap:16px;
+                  flex-wrap:wrap; margin-top:14px; padding-top:12px;
+                  border-top:2px solid rgba(0,0,0,.35);
                   font-size:1.15rem; font-weight:800; }}
+      .tc-duty {{ text-align:right; font-size:.95rem; max-width:66%; }}
       .tc-flag {{ background:rgba(150,40,40,.10); border-left:3px solid #a33;
                  padding:8px 12px; margin:8px 0; border-radius:4px; font-size:.85rem; }}
       .tc-foot {{ margin-top:16px; font-size:.75rem; opacity:.7; }}
@@ -248,10 +251,40 @@ def _row(k, v):
     return f"<div class='tc-row'><span class='tc-k'>{k}</span><span class='tc-v'>{v}</span></div>"
 
 
+_CUR_SYM = {"USD_cents": "¢", "USD": "$", "GBP": "£", "EUR": "€"}
+
+
+def _format_duty(duty):
+    """Render a duty for display, honoring specific/compound — not just the
+    ad-valorem %. For specific/compound the truest form is the original tariff
+    expression (e.g. '51¢ each + 6.25% on the case...'), which the adapters keep
+    in notes as  general)='<...>'. Falls back to structured fields, then to a
+    plain %."""
+    if not duty:
+        return "—"
+    if duty.get("duty_type") in ("specific", "compound"):
+        m = re.search(r"""general\)=(['"])(.*?)\1""", duty.get("notes") or "")
+        if m:
+            return m.group(2)
+        sym = _CUR_SYM.get(duty.get("currency"), duty.get("currency") or "")
+        amt, unit = duty.get("specific_amount"), (duty.get("specific_unit") or "")
+        parts = []
+        if amt is not None:
+            parts.append(f"{amt:g}{sym} each" if unit == "each"
+                         else f"{amt:g}{sym}/{unit}".rstrip("/"))
+        if duty.get("ad_valorem_rate"):
+            parts.append(f"{duty['ad_valorem_rate']:g}%")
+        return " + ".join(parts) or "—"
+    r = duty.get("ad_valorem_rate")
+    if r is None:
+        return "—"
+    return "Free" if r == 0 else f"{r:g}%"
+
+
 def metallic_invoice(r, country_label):
     card = r["card"]
     duty = card.get("duty") or {}
-    rate = f"{duty.get('ad_valorem_rate')}%" if duty else "—"
+    rate = _format_duty(duty)
     stamp = {"high": "#2e7d32", "medium": "#b26a00"}.get(r["confidence"], "#777")
 
     rows = _row("HS code", card["hs6"])
@@ -281,7 +314,7 @@ def metallic_invoice(r, country_label):
              {r['confidence'].upper()} · {r['path']}</div>
       </div>
       {rows}
-      <div class='tc-total'><span>MFN DUTY RATE</span><span>{rate}</span></div>
+      <div class='tc-total'><span>MFN DUTY</span><span class='tc-duty'>{rate}</span></div>
       {flags}
       <div class='tc-foot'>{src} &nbsp; · &nbsp; every number carries its source URL.</div>
     </div>

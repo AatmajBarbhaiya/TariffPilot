@@ -27,6 +27,16 @@ def classify(code):
     # Scope rule: Ammunition (Ch. 93 headings 9305, 9306)
     if chapter == "93" and heading in ("9305", "9306"):
         return "ammunition"
+    # Scope rule: Watches (Ch. 91 headings 9101, 9102 — finished wrist/pocket
+    # watches only; clocks (9103+) and watch parts/cases/straps (9108-9114)
+    # are deliberately excluded to keep scope tight, same as the ammo rule
+    # above only takes 2 of chapter 93's headings.)
+    if chapter == "91" and heading in ("9101", "9102"):
+        return "watches"
+    # Scope rule: Liquor (Ch. 22 heading 2208 — distilled spirits only; wine/
+    # beer/vinegar elsewhere in chapter 22 are out of scope.)
+    if chapter == "22" and heading == "2208":
+        return "liquor"
     return None
 
 

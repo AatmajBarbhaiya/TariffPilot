@@ -25,7 +25,7 @@ def init_sqlite_db():
         description TEXT NOT NULL,
         chapter TEXT NOT NULL,
         heading TEXT NOT NULL,
-        category_tag TEXT CHECK(category_tag IN ('medical', 'ammunition')),
+        category_tag TEXT CHECK(category_tag IN ('medical', 'ammunition', 'watches', 'liquor')),
         keywords TEXT,
         hs_revision TEXT
     );
@@ -46,7 +46,7 @@ def init_sqlite_db():
         specific_unit TEXT,
         currency TEXT,
         unit_of_quantity TEXT,
-        source TEXT CHECK(source IN ('WITS', 'USITC', 'UK_TARIFF', 'TARIC', 'WTO_TDF')),
+        source TEXT CHECK(source IN ('WITS', 'USITC', 'UK_TARIFF', 'TARIC', 'WTO_TDF', 'NATIONAL_MANUAL')),
         source_url TEXT NOT NULL,
         retrieved_date TEXT NOT NULL,
         effective_date TEXT,

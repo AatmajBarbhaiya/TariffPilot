@@ -109,6 +109,28 @@ KEYWORDS = {
     "902229": "radiation apparatus, industrial radiation, ionising radiation, non-medical radiotherapy",
     "902230": "x-ray tube, x-ray tubes, radiography tube",
     "902290": "x-ray parts, x-ray accessories, x-ray generator, high tension generator, x-ray components, control panel",
+    # ---------------------------------------------------------------------- watches
+    "910111": "luxury watch, gold watch, precious metal watch, analog watch, dress watch, electric watch with precious case",
+    "910119": "luxury watch, gold watch, precious metal watch, digital watch, quartz watch, opto-electronic display watch",
+    "910121": "automatic watch, self-winding watch, luxury automatic watch, gold automatic watch, mechanical automatic watch",
+    "910129": "manual wind watch, hand-wound watch, mechanical watch, luxury mechanical watch, gold mechanical watch",
+    "910191": "pocket watch, gold pocket watch, luxury pocket watch, electric pocket watch, precious metal stopwatch",
+    "910199": "pocket watch, gold pocket watch, mechanical pocket watch, antique pocket watch, non-electric pocket watch",
+    "910211": "analog watch, wristwatch, quartz analog watch, mechanical display watch, steel watch, everyday watch",
+    "910212": "digital watch, quartz watch, electronic watch, led watch, lcd watch, sports watch",
+    "910219": "smartwatch, combination display watch, hybrid watch, electronic wristwatch, digital analog watch",
+    "910221": "automatic watch, self-winding watch, mechanical watch, steel automatic watch, sports automatic watch",
+    "910229": "manual wind watch, hand-wound watch, mechanical wristwatch, classic watch, steel mechanical watch",
+    "910291": "pocket watch, electric pocket watch, steel pocket watch, non-precious pocket watch, stopwatch",
+    "910299": "pocket watch, mechanical pocket watch, steel pocket watch, antique pocket watch, non-electric pocket watch",
+    # ----------------------------------------------------------------------- liquor
+    "220820": "brandy, cognac, armagnac, grappa, grape spirit, pisco, grape brandy, distilled wine spirit",
+    "220830": "whisky, whiskey, scotch, bourbon, single malt, blended whisky, rye whiskey, irish whiskey",
+    "220840": "rum, dark rum, white rum, spiced rum, cachaca, sugar cane spirit, rhum",
+    "220850": "gin, geneva, dry gin, london dry gin, sloe gin, jenever, genever",
+    "220860": "vodka, potato vodka, grain vodka, flavored vodka, plain vodka",
+    "220870": "liqueur, cordial, flavored spirit, cream liqueur, herbal liqueur, fruit liqueur, schnapps",
+    "220890": "tequila, mezcal, soju, baijiu, aquavit, other spirits, spirituous beverage, hard liquor, distilled spirit",
 }
 
 

@@ -12,14 +12,12 @@
   {"product_description": "computed tomography CT scanner for hospital imaging", "correct_hs6": "902212", "category_tag": "medical", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
   {"product_description": "12 gauge shotgun cartridges, lead shot", "correct_hs6": "930621", "category_tag": "ammunition", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
   {"product_description": "centre-fire rifle cartridges, 7.62 mm", "correct_hs6": "930630", "category_tag": "ammunition", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
-
   {"product_description": "replacement cylinder and grip frame parts for a revolver", "correct_hs6": "930510", "category_tag": "ammunition", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
   {"product_description": "replacement barrel for a hunting shotgun", "correct_hs6": "930520", "category_tag": "ammunition", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
   {"product_description": "bolt carrier group parts for a military assault rifle of heading 9301", "correct_hs6": "930591", "category_tag": "ammunition", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
   {"product_description": "trigger assembly parts for a civilian sporting rifle", "correct_hs6": "930599", "category_tag": "ammunition", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
   {"product_description": "plastic wads and primers, components of shotgun cartridges", "correct_hs6": "930629", "category_tag": "ammunition", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
   {"product_description": "military hand grenades and practice munitions", "correct_hs6": "930690", "category_tag": "ammunition", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
-
   {"product_description": "extract of animal thyroid gland for organo-therapeutic use", "correct_hs6": "300120", "category_tag": "medical", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
   {"product_description": "heparin sodium prepared for therapeutic use", "correct_hs6": "300190", "category_tag": "medical", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
   {"product_description": "antivenom antiserum for snakebite treatment", "correct_hs6": "300212", "category_tag": "medical", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
@@ -50,5 +48,18 @@
   {"product_description": "digital behind-the-ear hearing aid device", "correct_hs6": "902140", "category_tag": "medical", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
   {"product_description": "cardiac pacemaker for stimulating heart muscle", "correct_hs6": "902150", "category_tag": "medical", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
   {"product_description": "dental x-ray apparatus for a dental practice", "correct_hs6": "902213", "category_tag": "medical", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
-  {"product_description": "x-ray tube component for a radiography machine", "correct_hs6": "902230", "category_tag": "medical", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"}
+  {"product_description": "x-ray tube component for a radiography machine", "correct_hs6": "902230", "category_tag": "medical", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
+  {"product_description": "gold wristwatch, quartz battery movement with analog hands", "correct_hs6": "910111", "category_tag": "watches", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
+  {"product_description": "solid gold self-winding automatic luxury wristwatch", "correct_hs6": "910121", "category_tag": "watches", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
+  {"product_description": "stainless steel automatic self-winding wristwatch", "correct_hs6": "910221", "category_tag": "watches", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
+  {"product_description": "digital LCD sports wristwatch with plastic case", "correct_hs6": "910212", "category_tag": "watches", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
+  {"product_description": "steel quartz analog wristwatch, battery operated", "correct_hs6": "910211", "category_tag": "watches", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
+  {"product_description": "hand-wound mechanical steel wristwatch, manual winding", "correct_hs6": "910229", "category_tag": "watches", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
+  {"product_description": "bottle of cognac brandy distilled from grape wine", "correct_hs6": "220820", "category_tag": "liquor", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
+  {"product_description": "bottle of single malt scotch whisky", "correct_hs6": "220830", "category_tag": "liquor", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
+  {"product_description": "bottle of dark caribbean rum", "correct_hs6": "220840", "category_tag": "liquor", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
+  {"product_description": "bottle of london dry gin, 700ml", "correct_hs6": "220850", "category_tag": "liquor", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
+  {"product_description": "bottle of premium grain vodka", "correct_hs6": "220860", "category_tag": "liquor", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
+  {"product_description": "bottle of Irish cream liqueur", "correct_hs6": "220870", "category_tag": "liquor", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"},
+  {"product_description": "bottle of blanco tequila", "correct_hs6": "220890", "category_tag": "liquor", "ruling_reference": "synthetic", "source_url": "https://www.wcotradetools.org/en/harmonized-system"}
 ]
